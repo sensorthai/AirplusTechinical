@@ -247,6 +247,9 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [availableDevices, setAvailableDevices] = useState<any[]>([]);
+  const [deviceStatuses, setDeviceStatuses] = useState<{[key: string]: boolean}>({});
+  const [deviceSearchTerm, setDeviceSearchTerm] = useState('');
+  const [showOnlyOnline, setShowOnlyOnline] = useState(false);
   const [linkingDevice, setLinkingDevice] = useState(false);
 
   useEffect(() => {
@@ -404,6 +407,19 @@ export default function App() {
         try {
           const devices = await tbService.getTenantDevices(100);
           setAvailableDevices(devices);
+          
+          // Fetch statuses for these devices
+          const statuses: {[key: string]: boolean} = {};
+          await Promise.all(devices.slice(0, 20).map(async (d: any) => {
+            try {
+              const attrs = await tbService.getAllAttributes('DEVICE', d.id.id);
+              const activeAttr = attrs.find((a: any) => a.key === 'active');
+              statuses[d.id.id] = activeAttr ? activeAttr.value === true : false;
+            } catch (e) {
+              console.warn(`Failed to fetch status for device ${d.id.id}`, e);
+            }
+          }));
+          setDeviceStatuses(statuses);
           setScreen('link-device');
         } catch (e) {
           console.error('Error fetching devices:', e);
@@ -1082,39 +1098,86 @@ export default function App() {
               <p className="text-slate-500 text-sm mt-1">No device is currently related to <b>{selectedAsset?.name}</b>. Please select a device to link.</p>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Available Devices</h3>
-              {availableDevices.length === 0 ? (
-                <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
-                  <p className="text-sm text-slate-400">No unlinked devices found</p>
-                </div>
-              ) : (
-                availableDevices.map((device) => (
-                  <button
-                    key={device.id.id}
-                    disabled={linkingDevice}
-                    onClick={() => handleLinkDevice(device)}
-                    className="w-full bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 flex items-center justify-between hover:border-primary transition-all group disabled:opacity-50"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="size-10 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
-                        <Zap size={20} />
+            <div className="space-y-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input 
+                  type="text"
+                  placeholder="Search Device ID or Name..."
+                  value={deviceSearchTerm}
+                  onChange={(e) => setDeviceSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+                />
+              </div>
+
+              <div className="flex items-center justify-between px-1">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Available Devices</h3>
+                <button 
+                  onClick={() => setShowOnlyOnline(!showOnlyOnline)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold transition-all",
+                    showOnlyOnline ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-500"
+                  )}
+                >
+                  <div className={cn("size-1.5 rounded-full", showOnlyOnline ? "bg-emerald-500" : "bg-slate-400")}></div>
+                  Online Only
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {(() => {
+                  const filtered = availableDevices.filter(d => {
+                    const matchesSearch = d.name.toLowerCase().includes(deviceSearchTerm.toLowerCase()) || 
+                                        d.id.id.toLowerCase().includes(deviceSearchTerm.toLowerCase());
+                    const isOnline = deviceStatuses[d.id.id] === true;
+                    return matchesSearch && (!showOnlyOnline || isOnline);
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                        <p className="text-sm text-slate-400">No matching devices found</p>
                       </div>
-                      <div className="text-left">
-                        <h4 className="font-bold text-slate-900 dark:text-white">{device.name}</h4>
-                        <p className="text-[10px] text-slate-500 uppercase font-bold">{device.type}</p>
+                    );
+                  }
+
+                  return filtered.map((device) => (
+                    <button
+                      key={device.id.id}
+                      disabled={linkingDevice}
+                      onClick={() => handleLinkDevice(device)}
+                      className="w-full bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 flex items-center justify-between hover:border-primary transition-all group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="size-10 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-primary transition-colors relative">
+                          <Zap size={20} />
+                          {deviceStatuses[device.id.id] !== undefined && (
+                            <span className={cn(
+                              "absolute -top-1 -right-1 size-2.5 rounded-full border-2 border-white dark:border-slate-800",
+                              deviceStatuses[device.id.id] ? "bg-emerald-500" : "bg-slate-300"
+                            )}></span>
+                          )}
+                        </div>
+                        <div className="text-left">
+                          <h4 className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{device.name}</h4>
+                          <div className="flex items-center gap-2">
+                            <p className="text-[10px] text-slate-500 uppercase font-bold">{device.type}</p>
+                            <span className="size-1 rounded-full bg-slate-300"></span>
+                            <p className="text-[10px] text-slate-400 font-mono">{device.id.id.substring(0, 8)}...</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    {linkingDevice ? (
-                      <Loader2 className="animate-spin text-primary" size={20} />
-                    ) : (
-                      <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ChevronRight size={18} />
-                      </div>
-                    )}
-                  </button>
-                ))
-              )}
+                      {linkingDevice ? (
+                        <Loader2 className="animate-spin text-primary" size={20} />
+                      ) : (
+                        <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <ChevronRight size={18} />
+                        </div>
+                      )}
+                    </button>
+                  ));
+                })()}
+              </div>
             </div>
 
             <button 
