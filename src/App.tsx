@@ -48,7 +48,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // --- Types ---
-type Screen = 'login' | 'assets' | 'stats' | 'fans' | 'settings';
+type Screen = 'login' | 'assets' | 'stats' | 'fans' | 'settings' | 'link-device';
 
 interface TelemetryData {
   pm_1: string;
@@ -84,6 +84,10 @@ interface TelemetryData {
 // --- Components ---
 
 const QRScannerEffect = ({ onScanSuccess }: { onScanSuccess: (text: string) => void }) => {
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const isInIframe = window.self !== window.top;
+
   useEffect(() => {
     const html5QrCode = new Html5Qrcode("reader");
     const config = { fps: 10, qrbox: { width: 250, height: 250 } };
@@ -99,6 +103,7 @@ const QRScannerEffect = ({ onScanSuccess }: { onScanSuccess: (text: string) => v
       }
     ).catch((err) => {
       console.error("Unable to start scanning", err);
+      setScannerError(err.toString());
     });
 
     return () => {
@@ -114,6 +119,27 @@ const QRScannerEffect = ({ onScanSuccess }: { onScanSuccess: (text: string) => v
       stopScanner();
     };
   }, [onScanSuccess]);
+
+  if (scannerError) {
+    return (
+      <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-center">
+        <p className="text-rose-600 text-xs font-bold mb-2">Camera Access Error</p>
+        <p className="text-[10px] text-rose-500 mb-3">
+          {isIOS && isInIframe 
+            ? "iOS Safari restricts camera access in iframes. Please open the app in a new tab to scan QR codes."
+            : "Could not access camera. Please check permissions."}
+        </p>
+        {isIOS && isInIframe && (
+          <button 
+            onClick={() => window.open(window.location.href, '_blank')}
+            className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg shadow-sm"
+          >
+            Open in New Tab
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return null;
 };
@@ -193,6 +219,8 @@ export default function App() {
     const saved = localStorage.getItem('recentSearches');
     return saved ? JSON.parse(saved) : [];
   });
+  const [availableDevices, setAvailableDevices] = useState<any[]>([]);
+  const [linkingDevice, setLinkingDevice] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
@@ -345,7 +373,15 @@ export default function App() {
         await fetchTelemetry(deviceRelation.to.id);
         setScreen('stats');
       } else {
-        setError('No device found for this house');
+        // No device found, fetch available devices and go to link screen
+        try {
+          const devices = await tbService.getTenantDevices(100);
+          setAvailableDevices(devices);
+          setScreen('link-device');
+        } catch (e) {
+          console.error('Error fetching devices:', e);
+          setError('No device found for this house and failed to fetch available devices');
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Failed to fetch relations');
@@ -420,6 +456,26 @@ export default function App() {
         }
       }
     });
+  };
+
+  const handleLinkDevice = async (device: any) => {
+    if (!selectedAsset) return;
+    setLinkingDevice(true);
+    try {
+      await tbService.saveRelation({
+        from: selectedAsset.id,
+        to: device.id,
+        type: 'Contains'
+      });
+      toast.success(`Device ${device.name} linked to ${selectedAsset.name}`);
+      setDeviceId(device.id.id);
+      await fetchTelemetry(device.id.id);
+      setScreen('stats');
+    } catch (err: any) {
+      toast.error('Failed to link device: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLinkingDevice(false);
+    }
   };
 
   const handleRelayMode = async (relayId: number, mode: string) => {
@@ -962,6 +1018,60 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto pb-24">
+        {screen === 'link-device' && (
+          <div className="p-6 space-y-6">
+            <div className="text-center">
+              <div className="size-16 bg-amber-50 text-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Smartphone size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Link New Device</h2>
+              <p className="text-slate-500 text-sm mt-1">No device is currently related to <b>{selectedAsset?.name}</b>. Please select a device to link.</p>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Available Devices</h3>
+              {availableDevices.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700">
+                  <p className="text-sm text-slate-400">No unlinked devices found</p>
+                </div>
+              ) : (
+                availableDevices.map((device) => (
+                  <button
+                    key={device.id.id}
+                    disabled={linkingDevice}
+                    onClick={() => handleLinkDevice(device)}
+                    className="w-full bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 flex items-center justify-between hover:border-primary transition-all group disabled:opacity-50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="size-10 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-primary transition-colors">
+                        <Zap size={20} />
+                      </div>
+                      <div className="text-left">
+                        <h4 className="font-bold text-slate-900 dark:text-white">{device.name}</h4>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">{device.type}</p>
+                      </div>
+                    </div>
+                    {linkingDevice ? (
+                      <Loader2 className="animate-spin text-primary" size={20} />
+                    ) : (
+                      <div className="size-8 rounded-full bg-primary/10 text-primary flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ChevronRight size={18} />
+                      </div>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <button 
+              onClick={() => setScreen('assets')}
+              className="w-full py-4 text-slate-500 font-bold text-sm hover:text-slate-700 transition-colors"
+            >
+              Cancel and Go Back
+            </button>
+          </div>
+        )}
+
         {screen === 'stats' && (
           <div className="p-4">
             {/* House Information at the top */}

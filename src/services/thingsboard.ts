@@ -355,6 +355,18 @@ class ThingsboardService {
     }
   }
 
+  async saveRelation(relation: Relation): Promise<void> {
+    console.log('Saving relation:', relation);
+    try {
+      await axios.post(`${BASE_URL}/api/relation`, relation, {
+        headers: this.headers,
+      });
+    } catch (error: any) {
+      console.error('Save relation error:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
   async getUserGroups(): Promise<any[]> {
     console.log('Fetching user groups...');
     try {
