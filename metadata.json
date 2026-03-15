@@ -1,0 +1,5 @@
+{
+  "name": "AirPlus Smart Home",
+  "description": "Smart home air quality monitoring and fan control system using Thingsboard API.",
+  "requestFramePermissions": ["camera"]
+}
