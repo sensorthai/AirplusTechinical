@@ -506,7 +506,7 @@ export default function App() {
     
     setConfirmAction({
       title: 'Confirm Device Link',
-      message: `Are you sure you want to link Device ID: ${device.id.id} to Asset Address: ${selectedAsset.address || selectedAsset.name}?`,
+      message: `Are you sure you want to link Device: ${device.name} (ID: ${device.id.id}) to Asset Address: ${selectedAsset.address || selectedAsset.name}?`,
       onConfirm: async () => {
         setLinkingDevice(true);
         setConfirmAction(null);
@@ -1103,7 +1103,7 @@ export default function App() {
                 <Smartphone size={32} />
               </div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Link New Device</h2>
-              <p className="text-slate-500 text-sm mt-1">No device is currently related to <b>{selectedAsset?.name}</b>. Please select a device to link.</p>
+              <p className="text-slate-500 text-sm mt-1">No device is currently related to <b>{selectedAsset?.address || selectedAsset?.name}</b>. Please select a device to link.</p>
             </div>
 
             <div className="space-y-4">
@@ -1167,7 +1167,7 @@ export default function App() {
                           )}
                         </div>
                         <div className="text-left">
-                          <h4 className="font-bold text-slate-900 dark:text-white truncate max-w-[180px]">{device.name}</h4>
+                          <h4 className="font-bold text-slate-900 dark:text-white">{device.name}</h4>
                           <div className="flex items-center gap-2">
                             <p className="text-[10px] text-slate-500 uppercase font-bold">{device.type}</p>
                             <span className="size-1 rounded-full bg-slate-300"></span>
