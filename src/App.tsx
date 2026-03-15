@@ -85,26 +85,42 @@ interface TelemetryData {
 
 const QRScannerEffect = ({ onScanSuccess }: { onScanSuccess: (text: string) => void }) => {
   const [scannerError, setScannerError] = useState<string | null>(null);
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const [retryCount, setRetryCount] = useState(0);
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   const isInIframe = window.self !== window.top;
 
   useEffect(() => {
     const html5QrCode = new Html5Qrcode("reader");
     const config = { fps: 10, qrbox: { width: 250, height: 250 } };
 
-    html5QrCode.start(
-      { facingMode: "environment" },
-      config,
-      (decodedText) => {
-        onScanSuccess(decodedText);
-      },
-      () => {
-        // silent error for each frame
+    const startScanner = async () => {
+      try {
+        setScannerError(null);
+        // Try environment camera first
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => onScanSuccess(decodedText),
+          () => {}
+        );
+      } catch (err) {
+        console.warn("Failed to start with environment camera, trying default", err);
+        try {
+          // Fallback to any available camera
+          await html5QrCode.start(
+            { facingMode: "user" },
+            config,
+            (decodedText) => onScanSuccess(decodedText),
+            () => {}
+          );
+        } catch (err2) {
+          console.error("Unable to start scanning with any camera", err2);
+          setScannerError(err2 instanceof Error ? err2.message : String(err2));
+        }
       }
-    ).catch((err) => {
-      console.error("Unable to start scanning", err);
-      setScannerError(err.toString());
-    });
+    };
+
+    startScanner();
 
     return () => {
       const stopScanner = async () => {
@@ -118,25 +134,36 @@ const QRScannerEffect = ({ onScanSuccess }: { onScanSuccess: (text: string) => v
       };
       stopScanner();
     };
-  }, [onScanSuccess]);
+  }, [onScanSuccess, retryCount]);
 
   if (scannerError) {
     return (
       <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-center">
         <p className="text-rose-600 text-xs font-bold mb-2">Camera Access Error</p>
-        <p className="text-[10px] text-rose-500 mb-3">
-          {isIOS && isInIframe 
-            ? "iOS Safari restricts camera access in iframes. Please open the app in a new tab to scan QR codes."
-            : "Could not access camera. Please check permissions."}
+        <p className="text-[10px] text-rose-500 mb-4 leading-relaxed">
+          {isInIframe && isMobile 
+            ? "Mobile browsers often restrict camera access inside iframes for security. Please open the app in a new tab to use the scanner."
+            : "Could not access camera. Please ensure you have granted permission and no other app is using it."}
         </p>
-        {isIOS && isInIframe && (
+        
+        <div className="flex flex-col gap-2">
+          {isInIframe && (
+            <button 
+              onClick={() => window.open(window.location.href, '_blank')}
+              className="w-full py-2.5 bg-primary text-white text-[10px] font-bold rounded-lg shadow-sm flex items-center justify-center gap-2"
+            >
+              <Share2 size={14} />
+              Open in New Tab
+            </button>
+          )}
           <button 
-            onClick={() => window.open(window.location.href, '_blank')}
-            className="px-4 py-2 bg-primary text-white text-[10px] font-bold rounded-lg shadow-sm"
+            onClick={() => setRetryCount(prev => prev + 1)}
+            className="w-full py-2.5 bg-white border border-slate-200 text-slate-600 text-[10px] font-bold rounded-lg flex items-center justify-center gap-2"
           >
-            Open in New Tab
+            <RotateCcw size={14} />
+            Try Again
           </button>
-        )}
+        </div>
       </div>
     );
   }
@@ -905,11 +932,38 @@ export default function App() {
 
         <main className="flex-1 p-6 space-y-4">
           {isScanning && (
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 overflow-hidden">
               <h3 className="font-bold text-center mb-4">Scan House QR Code</h3>
-              <div id="reader" className="w-full aspect-square rounded-xl overflow-hidden"></div>
+              <div id="reader" className="w-full aspect-square rounded-xl overflow-hidden bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
+                <p className="text-[10px] text-slate-400">Initializing camera...</p>
+              </div>
               <p className="text-xs text-slate-500 text-center mt-4">Position the QR code within the frame</p>
               
+              <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700">
+                <p className="text-[10px] font-bold text-slate-400 uppercase text-center mb-3">Or enter ID manually</p>
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Enter House ID or Name"
+                    className="flex-1 px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleScanSuccess((e.target as HTMLInputElement).value);
+                      }
+                    }}
+                  />
+                  <button 
+                    onClick={(e) => {
+                      const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                      handleScanSuccess(input.value);
+                    }}
+                    className="px-4 py-2 bg-primary text-white text-xs font-bold rounded-lg"
+                  >
+                    Go
+                  </button>
+                </div>
+              </div>
+
               {/* Initialize scanner when isScanning is true */}
               <QRScannerEffect onScanSuccess={handleScanSuccess} />
             </div>
