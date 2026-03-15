@@ -503,22 +503,30 @@ export default function App() {
 
   const handleLinkDevice = async (device: any) => {
     if (!selectedAsset) return;
-    setLinkingDevice(true);
-    try {
-      await tbService.saveRelation({
-        from: selectedAsset.id,
-        to: device.id,
-        type: 'Contains'
-      });
-      toast.success(`Device ${device.name} linked to ${selectedAsset.name}`);
-      setDeviceId(device.id.id);
-      await fetchTelemetry(device.id.id);
-      setScreen('stats');
-    } catch (err: any) {
-      toast.error('Failed to link device: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setLinkingDevice(false);
-    }
+    
+    setConfirmAction({
+      title: 'Confirm Device Link',
+      message: `Are you sure you want to link Device ID: ${device.id.id} to Asset Address: ${selectedAsset.address || selectedAsset.name}?`,
+      onConfirm: async () => {
+        setLinkingDevice(true);
+        setConfirmAction(null);
+        try {
+          await tbService.saveRelation({
+            from: selectedAsset.id,
+            to: device.id,
+            type: 'Contains'
+          });
+          toast.success(`Device ${device.name} linked to ${selectedAsset.name}`);
+          setDeviceId(device.id.id);
+          await fetchTelemetry(device.id.id);
+          setScreen('stats');
+        } catch (err: any) {
+          toast.error('Failed to link device: ' + (err.response?.data?.message || err.message));
+        } finally {
+          setLinkingDevice(false);
+        }
+      }
+    });
   };
 
   const handleRelayMode = async (relayId: number, mode: string) => {
