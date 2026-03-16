@@ -543,9 +543,19 @@ export default function App() {
 
     setLoading(true);
     try {
-      const method = `setFilterCounter_${id}`;
-      await tbService.sendRpcCommand(deviceId, method, value, false);
-      toast.success(`Filter ${id} counter set to ${value}`);
+      if (id === 0) {
+        // Set all filters
+        await Promise.all([
+          tbService.sendRpcCommand(deviceId, 'update_fan1_counter', value, false),
+          tbService.sendRpcCommand(deviceId, 'update_fan2_counter', value, false),
+          tbService.sendRpcCommand(deviceId, 'update_fan3_counter', value, false)
+        ]);
+        toast.success(`All filter counters set to ${value}`);
+      } else {
+        const method = `update_fan${id}_counter`;
+        await tbService.sendRpcCommand(deviceId, method, value, false);
+        toast.success(`Filter ${id} counter set to ${value}`);
+      }
       setFilterCounterModal(null);
       setFilterInputValue('');
       // Refresh telemetry
@@ -719,6 +729,7 @@ export default function App() {
         'airintake_2_rs485',
         'filter_1_counter', 
         'filter_2_counter',
+        'filter_3_counter',
         'airintake_1_status', 
         'relay_status', 
         'name',
@@ -729,6 +740,8 @@ export default function App() {
         'rs485_status',
         'uptime',
         'status',
+        'pm_1_status',
+        'pm_2_status',
         'OTAStatus',
         'OTAProgress'
       ];
@@ -741,7 +754,7 @@ export default function App() {
       else if (currentDuration === '7d') startTs = endTs - 7 * 24 * 3600000;
 
       const [telemetryData, clientAttributes, serverAttributes, timeseriesData] = await Promise.all([
-        tbService.getLatestTelemetry(id, ['pm_1', 'pm_2', 'temperature', 'humidity', 'controller_state', 'pm_1_moving_avg', 'pm_2_moving_avg', 'cpu_temp_c']),
+        tbService.getLatestTelemetry(id, ['pm_1', 'pm_2', 'temperature', 'humidity', 'controller_state', 'pm_1_moving_avg', 'pm_2_moving_avg', 'cpu_temp_c', 'pm_1_status', 'pm_2_status']),
         tbService.getAttributes('DEVICE', id, 'CLIENT_SCOPE', attributeKeys),
         tbService.getAttributes('DEVICE', id, 'SERVER_SCOPE', ['active', 'pm_1_status', 'pm_2_status']),
         tbService.getTimeseries(id, ['pm_1_moving_avg', 'pm_2_moving_avg'], startTs, endTs, 1000)
@@ -800,8 +813,8 @@ export default function App() {
         relays: relayMap,
         deviceName: deviceName,
         active: active,
-        pm_1_status: String(getServerAttr('pm_1_status') || '-'),
-        pm_2_status: String(getServerAttr('pm_2_status') || '-'),
+        pm_1_status: String(telemetryData.pm_1_status?.[0]?.value || getAttr('pm_1_status') || getServerAttr('pm_1_status') || '-'),
+        pm_2_status: String(telemetryData.pm_2_status?.[0]?.value || getAttr('pm_2_status') || getServerAttr('pm_2_status') || '-'),
         fan_1_mode: String(getAttr('fan_1_mode') || '-'),
         fan_1_rpm: String(getAttr('fan_1_rpm') || '-'),
         fan_1_rs485: String(getAttr('fan_1_rs485') || '-'),
@@ -829,6 +842,7 @@ export default function App() {
         uptime: String(getAttr('uptime') || '-'),
         status: String(getAttr('status') || '-'),
         filter_2_counter: Number(getAttr('filter_2_counter') || 0),
+        filter_3_counter: Number(getAttr('filter_3_counter') || 0),
         pm_1_moving_avg: telemetryData.pm_1_moving_avg?.[0]?.value || '-',
         pm_2_moving_avg: telemetryData.pm_2_moving_avg?.[0]?.value || '-',
         cpu_temp_c: telemetryData.cpu_temp_c?.[0]?.value || '-',
@@ -1149,7 +1163,9 @@ export default function App() {
                 <Settings size={20} />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Set Filter {filterCounterModal.id} Counter</h3>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  {filterCounterModal.id === 0 ? 'Set All Filters' : `Set Filter ${filterCounterModal.id} Counter`}
+                </h3>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Range: 0 - 4000 hours</p>
               </div>
             </div>
@@ -1958,14 +1974,14 @@ export default function App() {
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">PM 2.5 Sensor Indoor</span>
                   <span className={cn(
                     "text-sm font-bold",
-                    telemetry?.pm_1_status?.toLowerCase().includes('ok') ? "text-emerald-500" : "text-rose-500"
+                    (telemetry?.pm_1_status?.toLowerCase().includes('ok') || telemetry?.pm_1_status?.toLowerCase().includes('normal') || telemetry?.pm_1_status?.toLowerCase().includes('online')) ? "text-emerald-500" : "text-rose-500"
                   )}>{telemetry?.pm_1_status}</span>
                 </Card>
                 <Card className="flex items-center justify-between py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">PM 2.5 Sensor Outdoor</span>
                   <span className={cn(
                     "text-sm font-bold",
-                    telemetry?.pm_2_status?.toLowerCase().includes('ok') ? "text-emerald-500" : "text-rose-500"
+                    (telemetry?.pm_2_status?.toLowerCase().includes('ok') || telemetry?.pm_2_status?.toLowerCase().includes('normal') || telemetry?.pm_2_status?.toLowerCase().includes('online')) ? "text-emerald-500" : "text-rose-500"
                   )}>{telemetry?.pm_2_status}</span>
                 </Card>
                 <Card className="flex items-center justify-between py-3">
@@ -1983,55 +1999,46 @@ export default function App() {
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Datetime</span>
                   <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.datetime}</span>
                 </Card>
-                <Card className="flex items-center justify-between py-3">
-                  <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter 1 Counter</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_1_counter ?? 0} h</span>
+                <Card className="py-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter Counters</span>
                     {isTechAppUser && (
                       <button 
                         onClick={() => {
-                          setFilterCounterModal({ id: 1, currentValue: telemetry?.filter_1_counter ?? 0 });
+                          setFilterCounterModal({ id: 0, currentValue: telemetry?.filter_1_counter ?? 0 });
                           setFilterInputValue((telemetry?.filter_1_counter ?? 0).toString());
                         }}
-                        className="p-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary hover:text-white transition-all"
+                        className="flex items-center gap-1.5 px-2 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded-lg hover:bg-primary hover:text-white transition-all"
                       >
                         <Settings size={12} />
+                        Set All
                       </button>
                     )}
                   </div>
-                </Card>
-                <Card className="flex items-center justify-between py-3">
-                  <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter 2 Counter</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_2_counter ?? 0} h</span>
-                    {isTechAppUser && (
-                      <button 
-                        onClick={() => {
-                          setFilterCounterModal({ id: 2, currentValue: telemetry?.filter_2_counter ?? 0 });
-                          setFilterInputValue((telemetry?.filter_2_counter ?? 0).toString());
-                        }}
-                        className="p-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary hover:text-white transition-all"
-                      >
-                        <Settings size={12} />
-                      </button>
-                    )}
-                  </div>
-                </Card>
-                <Card className="flex items-center justify-between py-3">
-                  <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter 3 Counter</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_3_counter ?? 0} h</span>
-                    {isTechAppUser && (
-                      <button 
-                        onClick={() => {
-                          setFilterCounterModal({ id: 3, currentValue: telemetry?.filter_3_counter ?? 0 });
-                          setFilterInputValue((telemetry?.filter_3_counter ?? 0).toString());
-                        }}
-                        className="p-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary hover:text-white transition-all"
-                      >
-                        <Settings size={12} />
-                      </button>
-                    )}
+                  <div className="flex items-center justify-between gap-2">
+                    {[1, 2, 3].map((id) => {
+                      const val = id === 1 ? telemetry?.filter_1_counter : id === 2 ? telemetry?.filter_2_counter : telemetry?.filter_3_counter;
+                      const displayVal = val ?? 0;
+                      return (
+                        <div key={id} className="flex-1 flex flex-col items-center p-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase mb-1">Filter {id}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-bold text-slate-900 dark:text-white">{displayVal} h</span>
+                            {isTechAppUser && (
+                              <button 
+                                onClick={() => {
+                                  setFilterCounterModal({ id, currentValue: displayVal });
+                                  setFilterInputValue(displayVal.toString());
+                                }}
+                                className="p-1 bg-primary/10 text-primary rounded hover:bg-primary hover:text-white transition-all"
+                              >
+                                <Settings size={10} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </Card>
                 <Card className="flex items-center justify-between py-3">
