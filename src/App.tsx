@@ -25,7 +25,9 @@ import {
   Bell,
   User,
   RotateCcw,
-  DownloadCloud
+  DownloadCloud,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -59,6 +61,7 @@ interface TelemetryData {
   fan_1_status?: string;
   filter_1_counter?: number;
   filter_2_counter?: number;
+  filter_3_counter?: number;
   airintake_1_status?: string;
   relays?: { [key: string]: string };
   deviceName?: string;
@@ -229,6 +232,11 @@ const formatUptime = (uptime: string | undefined) => {
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('login');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assets, setAssets] = useState<AssetInfo[]>([]);
@@ -255,6 +263,15 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
   }, [recentSearches]);
+
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
 
   const isTechAppUser = userGroups.some(g => g.name === 'TechApp');
 
@@ -284,6 +301,12 @@ export default function App() {
   const [expandedAirintake, setExpandedAirintake] = useState(true);
   const [expandedFanPM25, setExpandedFanPM25] = useState(true);
   const [expandedVentilation, setExpandedVentilation] = useState(true);
+
+  const [filterCounterModal, setFilterCounterModal] = useState<{
+    id: number;
+    currentValue: number;
+  } | null>(null);
+  const [filterInputValue, setFilterInputValue] = useState('');
 
   // API-based search with debounce
   useEffect(() => {
@@ -487,6 +510,11 @@ export default function App() {
       title: 'OTA Update',
       message: 'Are you sure you want to trigger an OTA update?',
       onConfirm: async () => {
+        if (telemetry?.active === false) {
+          toast.error('Cannot send command: Device is offline');
+          setConfirmAction(null);
+          return;
+        }
         setLoading(true);
         try {
           await tbService.sendRpcCommand(deviceId, 'OTAUpdate', 'RUN', false);
@@ -499,6 +527,46 @@ export default function App() {
         }
       }
     });
+  };
+
+  const handleSetFilterCounter = async (id: number, value: number) => {
+    if (!deviceId) return;
+    if (value < 0 || value > 4000) {
+      toast.error('Value must be between 0 and 4000');
+      return;
+    }
+
+    if (telemetry?.active === false) {
+      toast.error('Cannot send command: Device is offline');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const method = `setFilterCounter_${id}`;
+      await tbService.sendRpcCommand(deviceId, method, value, false);
+      toast.success(`Filter ${id} counter set to ${value}`);
+      setFilterCounterModal(null);
+      setFilterInputValue('');
+      // Refresh telemetry
+      await fetchTelemetry(deviceId);
+    } catch (err: any) {
+      toast.error(`Failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestCameraPermission = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // Stop the stream immediately after getting permission
+      stream.getTracks().forEach(track => track.stop());
+      toast.success('Camera permission granted');
+    } catch (err) {
+      console.error('Camera permission denied', err);
+      toast.error('Camera permission denied. Please check your browser settings.');
+    }
   };
 
   const handleLinkDevice = async (device: any) => {
@@ -539,6 +607,11 @@ export default function App() {
       title: `Set Fan ${relayId} to ${mode}`,
       message: `Are you sure you want to set Ventilation Fan ${relayId} to ${mode}?`,
       onConfirm: async () => {
+        if (telemetry?.active === false) {
+          toast.error('Cannot send command: Device is offline');
+          setConfirmAction(null);
+          return;
+        }
         setLoading(true);
         try {
           await tbService.sendRpcCommand(deviceId, method, params, false);
@@ -592,6 +665,11 @@ export default function App() {
       title,
       message,
       onConfirm: async () => {
+        if (telemetry?.active === false) {
+          toast.error('Cannot send command: Device is offline');
+          setConfirmAction(null);
+          return;
+        }
         setLoading(true);
         try {
           await tbService.sendRpcCommand(deviceId, method, params, false);
@@ -1058,6 +1136,54 @@ export default function App() {
                 className="flex-1 py-3 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/20"
               >
                 Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {filterCounterModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-6 z-[100] backdrop-blur-sm">
+          <div className="w-full max-w-xs bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="size-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                <Settings size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Set Filter {filterCounterModal.id} Counter</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Range: 0 - 4000 hours</p>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-xs font-bold text-slate-400 uppercase mb-2 ml-1">New Counter Value (h)</label>
+              <input 
+                type="number"
+                min="0"
+                max="4000"
+                value={filterInputValue}
+                onChange={(e) => setFilterInputValue(e.target.value)}
+                placeholder="Enter value (0-4000)"
+                className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  setFilterCounterModal(null);
+                  setFilterInputValue('');
+                }}
+                className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold rounded-xl"
+              >
+                Cancel
+              </button>
+              <button 
+                disabled={loading || filterInputValue === '' || parseInt(filterInputValue) < 0 || parseInt(filterInputValue) > 4000}
+                onClick={() => handleSetFilterCounter(filterCounterModal.id, parseInt(filterInputValue))}
+                className="flex-1 py-3 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {loading && <Loader2 size={16} className="animate-spin" />}
+                Save
               </button>
             </div>
           </div>
@@ -1750,9 +1876,9 @@ export default function App() {
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Controller State</span>
                   <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.controller_state}</span>
                 </Card>
-                <Card className="flex items-center justify-between py-3">
+                <Card className="flex flex-col gap-1 py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Board Detail</span>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.board_detail}</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white break-words">{telemetry?.board_detail}</span>
                 </Card>
                 <Card className="flex items-center justify-between py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Board Type</span>
@@ -1761,6 +1887,46 @@ export default function App() {
                 <Card className="flex items-center justify-between py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Firmware Version</span>
                   <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.firmware_version}</span>
+                </Card>
+              </div>
+            </section>
+
+            <section>
+              <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3 ml-1">App Settings</h2>
+              <div className="space-y-2">
+                <Card className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="size-8 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center text-slate-500">
+                      {theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />}
+                    </div>
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Dark Mode</span>
+                  </div>
+                  <button 
+                    onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                    className={cn(
+                      "w-12 h-6 rounded-full transition-colors relative",
+                      theme === 'dark' ? "bg-primary" : "bg-slate-200 dark:bg-slate-700"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-1 size-4 bg-white rounded-full transition-all shadow-sm",
+                      theme === 'dark' ? "left-7" : "left-1"
+                    )}></div>
+                  </button>
+                </Card>
+                <Card className="flex items-center justify-between py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="size-8 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center text-slate-500">
+                      <Scan size={18} />
+                    </div>
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Camera Access</span>
+                  </div>
+                  <button 
+                    onClick={requestCameraPermission}
+                    className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg hover:bg-primary hover:text-white transition-all"
+                  >
+                    Request
+                  </button>
                 </Card>
               </div>
             </section>
@@ -1819,11 +1985,54 @@ export default function App() {
                 </Card>
                 <Card className="flex items-center justify-between py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter 1 Counter</span>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_1_counter ?? 0} h</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_1_counter ?? 0} h</span>
+                    {isTechAppUser && (
+                      <button 
+                        onClick={() => {
+                          setFilterCounterModal({ id: 1, currentValue: telemetry?.filter_1_counter ?? 0 });
+                          setFilterInputValue((telemetry?.filter_1_counter ?? 0).toString());
+                        }}
+                        className="p-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary hover:text-white transition-all"
+                      >
+                        <Settings size={12} />
+                      </button>
+                    )}
+                  </div>
                 </Card>
                 <Card className="flex items-center justify-between py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter 2 Counter</span>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_2_counter ?? 0} h</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_2_counter ?? 0} h</span>
+                    {isTechAppUser && (
+                      <button 
+                        onClick={() => {
+                          setFilterCounterModal({ id: 2, currentValue: telemetry?.filter_2_counter ?? 0 });
+                          setFilterInputValue((telemetry?.filter_2_counter ?? 0).toString());
+                        }}
+                        className="p-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary hover:text-white transition-all"
+                      >
+                        <Settings size={12} />
+                      </button>
+                    )}
+                  </div>
+                </Card>
+                <Card className="flex items-center justify-between py-3">
+                  <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Filter 3 Counter</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">{telemetry?.filter_3_counter ?? 0} h</span>
+                    {isTechAppUser && (
+                      <button 
+                        onClick={() => {
+                          setFilterCounterModal({ id: 3, currentValue: telemetry?.filter_3_counter ?? 0 });
+                          setFilterInputValue((telemetry?.filter_3_counter ?? 0).toString());
+                        }}
+                        className="p-1.5 bg-primary/10 text-primary rounded-md hover:bg-primary hover:text-white transition-all"
+                      >
+                        <Settings size={12} />
+                      </button>
+                    )}
+                  </div>
                 </Card>
                 <Card className="flex items-center justify-between py-3">
                   <span className="text-sm font-medium text-slate-600 dark:text-slate-400">PM 1 Moving Avg</span>

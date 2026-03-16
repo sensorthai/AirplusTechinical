@@ -350,6 +350,10 @@ class ThingsboardService {
       });
       return response.data;
     } catch (error: any) {
+      if (error.response?.status === 409) {
+        console.error('RPC command error: Device is offline or disconnected (409)');
+        throw new Error('Device is offline. Please check its connection.');
+      }
       console.error('RPC command error:', error.response?.data || error.message);
       throw error;
     }
