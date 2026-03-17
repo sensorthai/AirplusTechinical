@@ -27,7 +27,8 @@ import {
   RotateCcw,
   DownloadCloud,
   Sun,
-  Moon
+  Moon,
+  HelpCircle
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -50,7 +51,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // --- Types ---
-type Screen = 'login' | 'assets' | 'stats' | 'fans' | 'settings' | 'link-device';
+type Screen = 'login' | 'assets' | 'stats' | 'fans' | 'settings' | 'link-device' | 'support';
 
 interface TelemetryData {
   pm_1: string;
@@ -141,31 +142,61 @@ const QRScannerEffect = ({ onScanSuccess }: { onScanSuccess: (text: string) => v
 
   if (scannerError) {
     return (
-      <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-center">
-        <p className="text-rose-600 text-xs font-bold mb-2">Camera Access Error</p>
-        <p className="text-[10px] text-rose-500 mb-4 leading-relaxed">
-          {isInIframe && isMobile 
-            ? "Mobile browsers often restrict camera access inside iframes for security. Please open the app in a new tab to use the scanner."
-            : "Could not access camera. Please ensure you have granted permission and no other app is using it."}
-        </p>
+      <div className="p-4 bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/20 rounded-xl">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="size-6 bg-rose-100 dark:bg-rose-900/30 rounded-full flex items-center justify-center text-rose-500">
+            <X size={14} />
+          </div>
+          <p className="text-rose-600 dark:text-rose-400 text-xs font-bold uppercase tracking-wider">Camera Access Error</p>
+        </div>
         
-        <div className="flex flex-col gap-2">
-          {isInIframe && (
+        <div className="space-y-3">
+          <p className="text-[10px] text-rose-500 dark:text-rose-400/70 leading-relaxed font-medium">
+            {isInIframe && isMobile 
+              ? "Mobile browsers restrict camera access inside iframes. Please open the app in a new tab to use the scanner."
+              : "Could not access camera. Please follow the instructions below to enable it."}
+          </p>
+
+          <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-rose-100 dark:border-rose-900/20 space-y-3">
+            <div>
+              <p className="text-[10px] font-bold text-slate-900 dark:text-white uppercase mb-1 flex items-center gap-1">
+                <Smartphone size={10} /> iPhone / iOS
+              </p>
+              <ul className="text-[9px] text-slate-500 dark:text-slate-400 list-disc ml-3 space-y-0.5">
+                <li><strong>Safari:</strong> Settings &gt; Safari &gt; Camera &gt; Allow</li>
+                <li><strong>Chrome:</strong> Settings &gt; Chrome &gt; Camera &gt; On</li>
+              </ul>
+            </div>
+            
+            <div>
+              <p className="text-[10px] font-bold text-slate-900 dark:text-white uppercase mb-1 flex items-center gap-1">
+                <Smartphone size={10} /> Android
+              </p>
+              <ul className="text-[9px] text-slate-500 dark:text-slate-400 list-disc ml-3 space-y-0.5">
+                <li><strong>Chrome:</strong> Tap ⋮ &gt; Settings &gt; Site Settings &gt; Camera &gt; Allow</li>
+                <li><strong>System:</strong> Settings &gt; Apps &gt; Chrome &gt; Permissions &gt; Camera &gt; Allow</li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {isInIframe && (
+              <button 
+                onClick={() => window.open(window.location.href, '_blank')}
+                className="w-full py-2.5 bg-primary text-white text-[10px] font-bold rounded-lg shadow-sm flex items-center justify-center gap-2"
+              >
+                <Share2 size={14} />
+                Open in New Tab
+              </button>
+            )}
             <button 
-              onClick={() => window.open(window.location.href, '_blank')}
-              className="w-full py-2.5 bg-primary text-white text-[10px] font-bold rounded-lg shadow-sm flex items-center justify-center gap-2"
+              onClick={() => setRetryCount(prev => prev + 1)}
+              className="w-full py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg flex items-center justify-center gap-2"
             >
-              <Share2 size={14} />
-              Open in New Tab
+              <RotateCcw size={14} />
+              Try Again
             </button>
-          )}
-          <button 
-            onClick={() => setRetryCount(prev => prev + 1)}
-            className="w-full py-2.5 bg-white border border-slate-200 text-slate-600 text-[10px] font-bold rounded-lg flex items-center justify-center gap-2"
-          >
-            <RotateCcw size={14} />
-            Try Again
-          </button>
+          </div>
         </div>
       </div>
     );
@@ -307,6 +338,29 @@ export default function App() {
     currentValue: number;
   } | null>(null);
   const [filterInputValue, setFilterInputValue] = useState('');
+  const [supportMessage, setSupportMessage] = useState('');
+  const [isPostingSupport, setIsPostingSupport] = useState(false);
+  const [supportLogs, setSupportLogs] = useState<TelemetryValue[]>([]);
+
+  const handlePostSupportLog = async () => {
+    if (!supportMessage.trim() || !selectedAsset) {
+      toast.error('Please enter a message and ensure an asset is selected');
+      return;
+    }
+
+    setIsPostingSupport(true);
+    try {
+      await tbService.saveTelemetry(selectedAsset.id.id, { TechSupport: supportMessage.trim() }, 'ASSET');
+      toast.success('Activity logged to TechSupport');
+      setSupportMessage('');
+      // Refresh telemetry to show the update
+      if (deviceId) await fetchTelemetry(deviceId);
+    } catch (err: any) {
+      toast.error(`Failed to log activity: ${err.message}`);
+    } finally {
+      setIsPostingSupport(false);
+    }
+  };
 
   // API-based search with debounce
   useEffect(() => {
@@ -695,7 +749,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (deviceId && (screen === 'stats' || screen === 'fans' || screen === 'settings')) {
+    if (deviceId && (screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support')) {
       fetchTelemetry(deviceId, duration);
       
       const interval = setInterval(() => {
@@ -743,7 +797,8 @@ export default function App() {
         'pm_1_status',
         'pm_2_status',
         'OTAStatus',
-        'OTAProgress'
+        'OTAProgress',
+        'TechSupport'
       ];
 
       // Calculate start and end time based on duration
@@ -753,12 +808,15 @@ export default function App() {
       else if (currentDuration === '6h') startTs = endTs - 6 * 3600000;
       else if (currentDuration === '7d') startTs = endTs - 7 * 24 * 3600000;
 
-      const [telemetryData, clientAttributes, serverAttributes, timeseriesData] = await Promise.all([
+      const [telemetryData, clientAttributes, serverAttributes, timeseriesData, supportLogsData] = await Promise.all([
         tbService.getLatestTelemetry(id, ['pm_1', 'pm_2', 'temperature', 'humidity', 'controller_state', 'pm_1_moving_avg', 'pm_2_moving_avg', 'cpu_temp_c', 'pm_1_status', 'pm_2_status']),
         tbService.getAttributes('DEVICE', id, 'CLIENT_SCOPE', attributeKeys),
         tbService.getAttributes('DEVICE', id, 'SERVER_SCOPE', ['active', 'pm_1_status', 'pm_2_status']),
-        tbService.getTimeseries(id, ['pm_1_moving_avg', 'pm_2_moving_avg'], startTs, endTs, 1000)
+        tbService.getTimeseries(id, ['pm_1_moving_avg', 'pm_2_moving_avg'], startTs, endTs, 1000),
+        selectedAsset ? tbService.getTimeseries(selectedAsset.id.id, ['TechSupport'], Date.now() - 30 * 24 * 3600000, Date.now(), 5, 'ASSET') : Promise.resolve({ TechSupport: [] })
       ]);
+
+      setSupportLogs(supportLogsData.TechSupport || []);
 
       // Helper to find attribute value
       const getAttr = (key: string) => clientAttributes.find((a: any) => a.key === key)?.value;
@@ -2107,6 +2165,130 @@ export default function App() {
             </section>
           </div>
         )}
+        {screen === 'support' && (
+          <div className="p-4 space-y-6">
+            <div className="text-center py-6">
+              <div className="size-16 bg-primary/10 rounded-3xl flex items-center justify-center text-primary mx-auto mb-4">
+                <HelpCircle size={32} />
+              </div>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white">Customer Support</h1>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">We're here to help you</p>
+            </div>
+
+            {selectedAsset && (
+              <section className="space-y-3">
+                <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Activity Logging</h2>
+                <Card className="p-4 space-y-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="size-8 bg-primary/10 rounded-lg flex items-center justify-center text-primary">
+                      <Smartphone size={18} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">Tech Support Log</h3>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">Related Asset: {selectedAsset.name}</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Activity History (Last 5)</label>
+                    <div className="space-y-2">
+                      {supportLogs.length > 0 ? (
+                        supportLogs.map((log, idx) => (
+                          <div key={idx} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700">
+                            <div className="flex justify-between items-start mb-1">
+                              <span className="text-[9px] font-bold text-primary uppercase">Log #{supportLogs.length - idx}</span>
+                              <span className="text-[9px] text-slate-400">{new Date(log.ts).toLocaleString()}</span>
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                              {log.value}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 min-h-[40px] flex items-center justify-center">
+                          <span className="text-xs text-slate-400 italic">No activity logged yet</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">New Activity Post</label>
+                    <textarea 
+                      value={supportMessage}
+                      onChange={(e) => setSupportMessage(e.target.value)}
+                      placeholder="Enter support activity details..."
+                      className="w-full p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-700 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all resize-none h-24"
+                    />
+                  </div>
+
+                  <button 
+                    onClick={handlePostSupportLog}
+                    disabled={isPostingSupport || !supportMessage.trim()}
+                    className="w-full py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPostingSupport ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Share2 size={18} />
+                    )}
+                    Post Activity
+                  </button>
+                </Card>
+              </section>
+            )}
+
+            <section className="space-y-3">
+              <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Contact Us</h2>
+              <div className="grid grid-cols-1 gap-3">
+                <Card className="p-4 flex items-center gap-4">
+                  <div className="size-10 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center text-emerald-500">
+                    <Zap size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Live Chat</h3>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">Available Mon-Fri, 9am-6pm</p>
+                  </div>
+                  <ChevronRight size={16} className="text-slate-400" />
+                </Card>
+                <Card className="p-4 flex items-center gap-4">
+                  <div className="size-10 bg-blue-50 dark:bg-blue-900/20 rounded-xl flex items-center justify-center text-blue-500">
+                    <Bell size={20} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">Email Support</h3>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">Response within 24 hours</p>
+                  </div>
+                  <ChevronRight size={16} className="text-slate-400" />
+                </Card>
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <h2 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Common Issues</h2>
+              <div className="space-y-2">
+                {[
+                  "How to link a new device?",
+                  "Understanding PM2.5 readings",
+                  "Setting up fan schedules",
+                  "Updating firmware via OTA"
+                ].map((q, i) => (
+                  <Card key={i} className="flex items-center justify-between py-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{q}</span>
+                    <ChevronRight size={16} className="text-slate-400" />
+                  </Card>
+                ))}
+              </div>
+            </section>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700">
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 text-center leading-relaxed">
+                App Version: 2.1.0<br />
+                © 2026 Smart Ventilation Systems
+              </p>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Bottom Navigation */}
@@ -2138,6 +2320,13 @@ export default function App() {
         >
           <Settings size={24} />
           <span className="text-[10px] font-bold uppercase tracking-wider">Settings</span>
+        </button>
+        <button 
+          onClick={() => setScreen('support')}
+          className={cn("flex flex-col items-center gap-1", screen === 'support' ? "text-primary" : "text-slate-400 dark:text-slate-500")}
+        >
+          <HelpCircle size={24} />
+          <span className="text-[10px] font-bold uppercase tracking-wider">Support</span>
         </button>
       </nav>
 

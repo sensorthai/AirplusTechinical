@@ -318,10 +318,10 @@ class ThingsboardService {
     }
   }
 
-  async getTimeseries(deviceId: string, keys: string[], startTs: number, endTs: number, limit: number = 1000): Promise<TelemetryResponse> {
-    console.log('Fetching timeseries for device:', deviceId, 'keys:', keys);
+  async getTimeseries(entityId: string, keys: string[], startTs: number, endTs: number, limit: number = 1000, entityType: string = 'DEVICE'): Promise<TelemetryResponse> {
+    console.log(`Fetching timeseries for ${entityType}:`, entityId, 'keys:', keys);
     try {
-      const response = await axios.get(`${BASE_URL}/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries`, {
+      const response = await axios.get(`${BASE_URL}/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
         params: {
           keys: keys.join(','),
           startTs,
@@ -355,6 +355,18 @@ class ThingsboardService {
         throw new Error('Device is offline. Please check its connection.');
       }
       console.error('RPC command error:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  async saveTelemetry(entityId: string, telemetry: any, entityType: string = 'DEVICE', scope: string = 'ANY'): Promise<void> {
+    console.log(`Saving telemetry for ${entityType}:`, entityId, telemetry);
+    try {
+      await axios.post(`${BASE_URL}/api/plugins/telemetry/${entityType}/${entityId}/timeseries/${scope}`, telemetry, {
+        headers: this.headers,
+      });
+    } catch (error: any) {
+      console.error('Save telemetry error:', error.response?.data || error.message);
       throw error;
     }
   }
