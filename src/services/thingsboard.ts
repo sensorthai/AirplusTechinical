@@ -16,6 +16,9 @@ export interface AssetInfo {
   orderId?: string;
   transferDate?: string;
   project?: string;
+  activeTask?: boolean;
+  techTask?: string;
+  taskTimestamp?: number;
 }
 
 export interface Relation {
@@ -302,10 +305,10 @@ class ThingsboardService {
     }
   }
 
-  async getLatestTelemetry(deviceId: string, keys: string[]): Promise<TelemetryResponse> {
-    console.log('Fetching latest telemetry for device:', deviceId, 'keys:', keys);
+  async getLatestTelemetry(entityId: string, keys: string[], entityType: string = 'DEVICE'): Promise<TelemetryResponse> {
+    console.log(`Fetching latest telemetry for ${entityType}:`, entityId, 'keys:', keys);
     try {
-      const response = await axios.get(`${BASE_URL}/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries`, {
+      const response = await axios.get(`${BASE_URL}/api/plugins/telemetry/${entityType}/${entityId}/values/timeseries`, {
         params: {
           keys: keys.join(','),
         },

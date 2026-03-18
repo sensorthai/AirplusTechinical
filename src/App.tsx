@@ -360,6 +360,18 @@ export default function App() {
     } finally {
       setIsPostingSupport(false);
     }
+  };  const enrichAssetsWithActiveTasks = async (assetsList: AssetInfo[]) => {
+    return await Promise.all(assetsList.map(async (asset) => {
+      try {
+        const telemetry = await tbService.getLatestTelemetry(asset.id.id, ['ActiveTask', 'TechTask'], 'ASSET');
+        const activeTask = telemetry.ActiveTask?.[0]?.value === 'true';
+        const techTask = telemetry.TechTask?.[0]?.value;
+        const taskTimestamp = telemetry.ActiveTask?.[0]?.ts || telemetry.TechTask?.[0]?.ts;
+        return { ...asset, activeTask, techTask, taskTimestamp };
+      } catch (e) {
+        return asset;
+      }
+    }));
   };
 
   // API-based search with debounce
@@ -399,7 +411,8 @@ export default function App() {
           }
         }));
 
-        setAssets(assetsWithAttrs);
+        const assetsWithTasks = await enrichAssetsWithActiveTasks(assetsWithAttrs);
+        setAssets(assetsWithTasks);
       } catch (err) {
         console.error('Search error:', err);
       } finally {
@@ -409,6 +422,7 @@ export default function App() {
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchTerm, initialAssets]);
+
   const handleLogin = async () => {
     setLoading(true);
     setError(null);
@@ -428,8 +442,9 @@ export default function App() {
         allAssets = await tbService.getAssetsByProfile('');
       }
       
-      setAssets(allAssets);
-      setInitialAssets(allAssets);
+      const assetsWithTasks = await enrichAssetsWithActiveTasks(allAssets);
+      setAssets(assetsWithTasks);
+      setInitialAssets(assetsWithTasks);
       setScreen('assets');
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -437,7 +452,6 @@ export default function App() {
       setLoading(false);
     }
   };
-
   const handleSelectAsset = async (asset: AssetInfo) => {
     if (searchTerm.trim()) {
       addToRecentSearches(searchTerm);
@@ -1157,6 +1171,50 @@ export default function App() {
               )}
               
               {/* Show Assets */}
+              {assets.some(a => a.activeTask) && (
+                <div className="mb-6">
+                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                    <Clock size={14} className="text-orange-500" />
+                    Active Tasks
+                  </h2>
+                  <div className="space-y-3">
+                    {assets.filter(a => a.activeTask).map((asset) => (
+                      <motion.button
+                        key={`active-${asset.id.id}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => handleSelectAsset(asset)}
+                        className="w-full bg-orange-50 p-4 rounded-2xl border border-orange-100 flex items-center justify-between hover:bg-orange-100 transition-all group"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="size-10 bg-orange-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-orange-200">
+                            <Home size={20} />
+                          </div>
+                          <div className="text-left">
+                            <h3 className="font-bold text-slate-900 text-sm">{asset.address || asset.name}</h3>
+                            <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
+                              {asset.techTask || 'Task in progress'}
+                            </p>
+                            {asset.taskTimestamp && (
+                              <p className="text-[9px] text-orange-400 mt-0.5">
+                                {new Date(asset.taskTimestamp).toLocaleString('th-TH', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="text-orange-300 group-hover:text-orange-500 transition-all" size={18} />
+                      </motion.button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {filteredAssets.map((asset) => (
                 <button 
                   key={asset.id.id}
