@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   ArrowLeft, 
   Share2, 
@@ -28,7 +29,8 @@ import {
   DownloadCloud,
   Sun,
   Moon,
-  HelpCircle
+  HelpCircle,
+  RotateCw
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -270,8 +272,6 @@ export default function App() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [assets, setAssets] = useState<AssetInfo[]>([]);
-  const [initialAssets, setInitialAssets] = useState<AssetInfo[]>([]);
   const [selectedAsset, setSelectedAsset] = useState<AssetInfo | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
@@ -290,6 +290,7 @@ export default function App() {
   const [deviceSearchTerm, setDeviceSearchTerm] = useState('');
   const [showOnlyOnline, setShowOnlyOnline] = useState(false);
   const [linkingDevice, setLinkingDevice] = useState(false);
+
 
   useEffect(() => {
     localStorage.setItem('recentSearches', JSON.stringify(recentSearches));
@@ -321,7 +322,6 @@ export default function App() {
   const [username, setUsername] = useState('inst.wsa@gmail.com');
   const [password, setPassword] = useState('654321wsa');
 
-  const [isSearching, setIsSearching] = useState(false);
 
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -354,97 +354,55 @@ export default function App() {
       toast.success('Activity logged to TechSupport');
       setSupportMessage('');
       // Refresh telemetry to show the update
-      if (deviceId) await fetchTelemetry(deviceId);
+      if (deviceId) refetchTelemetry();
     } catch (err: any) {
       toast.error(`Failed to log activity: ${err.message}`);
     } finally {
       setIsPostingSupport(false);
     }
-  };  const enrichAssetsWithActiveTasks = async (assetsList: AssetInfo[]) => {
-    return await Promise.all(assetsList.map(async (asset) => {
-      try {
-        const telemetry = await tbService.getLatestTelemetry(asset.id.id, ['ActiveTask', 'TechTask'], 'ASSET');
-        const activeTask = telemetry.ActiveTask?.[0]?.value === 'true';
-        const techTask = telemetry.TechTask?.[0]?.value;
-        const taskTimestamp = telemetry.ActiveTask?.[0]?.ts || telemetry.TechTask?.[0]?.ts;
-        return { ...asset, activeTask, techTask, taskTimestamp };
-      } catch (e) {
-        return asset;
-      }
-    }));
   };
 
-  // API-based search with debounce
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (searchTerm.trim() === '') {
-        setAssets(initialAssets);
-        return;
+  const { 
+    data: assetsData, 
+    isLoading: isAssetsLoading, 
+    refetch: refetchAssets 
+  } = useQuery({
+    queryKey: ['assets', userGroups],
+    queryFn: async () => {
+      if (!userGroups || userGroups.length === 0) return [];
+      
+      // Get assets from the "Houses" group (now optimized to include active task info)
+      let allAssets = await tbService.getAssetsByGroup('Houses');
+      
+      // If "Houses" group is empty or not found, try fetching all assets as a fallback
+      if (allAssets.length === 0) {
+        allAssets = await tbService.getAssetsByProfile('');
       }
+      return allAssets;
+    },
+    enabled: screen === 'assets' || screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support',
+  });
 
-      setIsSearching(true);
-      try {
-        const foundAssets = await tbService.searchAssetsInGroup('Houses', searchTerm);
+  const activeTaskAssets = useMemo(() => {
+    return (assetsData || []).filter(a => a.activeTask);
+  }, [assetsData]);
 
-        // Fetch attributes for found assets to show address
-        const assetsWithAttrs = await Promise.all(foundAssets.map(async (asset) => {
-          try {
-            const attrs = await tbService.getAllAttributes('ASSET', asset.id.id);
-            const addressAttr = attrs.find((a: any) => 
-              a.key.toLowerCase() === 'address' || 
-              a.key.toLowerCase().includes('address') ||
-              a.key.toLowerCase() === 'addr'
-            );
-            const orderIdAttr = attrs.find((a: any) => a.key === 'รหัสใบสั่งซื้อ');
-            const transferDateAttr = attrs.find((a: any) => a.key === 'วันที่โอน');
-            const projectAttr = attrs.find((a: any) => a.key === 'project');
-            
-            return { 
-              ...asset, 
-              address: addressAttr ? String(addressAttr.value) : undefined,
-              orderId: orderIdAttr ? String(orderIdAttr.value) : undefined,
-              transferDate: transferDateAttr ? String(transferDateAttr.value) : undefined,
-              project: projectAttr ? String(projectAttr.value) : undefined
-            };
-          } catch (e) {
-            return asset;
-          }
-        }));
-
-        const assetsWithTasks = await enrichAssetsWithActiveTasks(assetsWithAttrs);
-        setAssets(assetsWithTasks);
-      } catch (err) {
-        console.error('Search error:', err);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 500);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [searchTerm, initialAssets]);
+  const filteredAssets = useMemo(() => {
+    const baseAssets = assetsData || [];
+    if (!searchTerm.trim()) return baseAssets;
+    return baseAssets.filter(asset => 
+      asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (asset.address && asset.address.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  }, [assetsData, searchTerm]);
 
   const handleLogin = async () => {
     setLoading(true);
     setError(null);
     try {
       await tbService.login(username, password);
-      
-      // Fetch user groups
       const groups = await tbService.getUserGroups();
       setUserGroups(groups);
-      
-      // Fetch assets from the "Houses" group
-      let allAssets = await tbService.getAssetsByGroup('Houses');
-      
-      // If "Houses" group is empty or not found, try fetching all assets as a fallback
-      if (allAssets.length === 0) {
-        console.log('Houses group empty, fetching all assets...');
-        allAssets = await tbService.getAssetsByProfile('');
-      }
-      
-      const assetsWithTasks = await enrichAssetsWithActiveTasks(allAssets);
-      setAssets(assetsWithTasks);
-      setInitialAssets(assetsWithTasks);
       setScreen('assets');
     } catch (err: any) {
       setError(err.message || 'Login failed');
@@ -491,7 +449,6 @@ export default function App() {
       const deviceRelation = relations.find(r => r.to.entityType === 'DEVICE');
       if (deviceRelation) {
         setDeviceId(deviceRelation.to.id);
-        await fetchTelemetry(deviceRelation.to.id);
         setScreen('stats');
       } else {
         // No device found, fetch available devices and go to link screen
@@ -530,7 +487,7 @@ export default function App() {
     
     try {
       // 1. Try to find asset directly
-      const foundAsset = assets.find(a => a.name === decodedText || a.id.id === decodedText);
+      const foundAsset = (assetsData || []).find(a => a.name === decodedText || a.id.id === decodedText);
       if (foundAsset) {
         handleSelectAsset(foundAsset);
         return;
@@ -550,7 +507,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [assets, handleSelectAsset]);
+  }, [assetsData, handleSelectAsset]);
 
   const handleReboot = async () => {
     if (!deviceId) return;
@@ -627,7 +584,7 @@ export default function App() {
       setFilterCounterModal(null);
       setFilterInputValue('');
       // Refresh telemetry
-      await fetchTelemetry(deviceId);
+      refetchTelemetry();
     } catch (err: any) {
       toast.error(`Failed: ${err.message}`);
     } finally {
@@ -664,7 +621,7 @@ export default function App() {
           });
           toast.success(`Device ${device.name} linked to ${selectedAsset.name}`);
           setDeviceId(device.id.id);
-          await fetchTelemetry(device.id.id);
+          refetchTelemetry();
           setScreen('stats');
         } catch (err: any) {
           toast.error('Failed to link device: ' + (err.response?.data?.message || err.message));
@@ -762,211 +719,138 @@ export default function App() {
     });
   };
 
-  useEffect(() => {
-    if (deviceId && (screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support')) {
-      fetchTelemetry(deviceId, duration);
+  const { 
+    data: telemetryData, 
+    isLoading: isTelemetryLoading, 
+    refetch: refetchTelemetry 
+  } = useQuery({
+    queryKey: ['telemetry', deviceId, duration, selectedAsset?.id.id],
+    queryFn: async () => {
+      if (!deviceId) return null;
       
-      const interval = setInterval(() => {
-        fetchTelemetry(deviceId, duration);
-      }, 5000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [deviceId, screen, duration]);
-
-  const fetchTelemetry = async (id: string, currentDuration: string = duration) => {
-    try {
       const attributeKeys = [
-        'fan_1_status', 
-        'fan_1_mode',
-        'fan_1_rpm',
-        'fan_1_rs485',
-        'fan_2_status', 
-        'fan_2_mode',
-        'fan_2_rpm',
-        'fan_2_rs485',
-        'fan_3_status', 
-        'fan_3_mode',
-        'fan_3_rpm',
-        'fan_3_rs485',
-        'airintake_1_mode',
-        'airintake_1_status',
-        'airintake_1_rs485',
-        'airintake_2_mode',
-        'airintake_2_status',
-        'airintake_2_rs485',
-        'filter_1_counter', 
-        'filter_2_counter',
-        'filter_3_counter',
-        'airintake_1_status', 
-        'relay_status', 
-        'name',
-        'board_detail',
-        'board_type',
-        'datetime',
-        'firmware_version',
-        'rs485_status',
-        'uptime',
-        'status',
-        'pm_1_status',
-        'pm_2_status',
-        'OTAStatus',
-        'OTAProgress',
-        'TechSupport'
+        'fan_1_status', 'fan_1_mode', 'fan_1_rpm', 'fan_1_rs485',
+        'fan_2_status', 'fan_2_mode', 'fan_2_rpm', 'fan_2_rs485',
+        'fan_3_status', 'fan_3_mode', 'fan_3_rpm', 'fan_3_rs485',
+        'airintake_1_mode', 'airintake_1_status', 'airintake_1_rs485',
+        'airintake_2_mode', 'airintake_2_status', 'airintake_2_rs485',
+        'filter_1_counter', 'filter_2_counter', 'filter_3_counter',
+        'relay_status', 'name', 'board_detail', 'board_type',
+        'datetime', 'firmware_version', 'rs485_status', 'uptime',
+        'status', 'pm_1_status', 'pm_2_status', 'OTAStatus',
+        'OTAProgress', 'TechSupport'
       ];
 
-      // Calculate start and end time based on duration
       const endTs = Date.now();
-      let startTs = endTs - 24 * 3600000; // Default 24h
-      if (currentDuration === '1h') startTs = endTs - 3600000;
-      else if (currentDuration === '6h') startTs = endTs - 6 * 3600000;
-      else if (currentDuration === '7d') startTs = endTs - 7 * 24 * 3600000;
+      let startTs = endTs - 24 * 3600000;
+      if (duration === '1h') startTs = endTs - 3600000;
+      else if (duration === '6h') startTs = endTs - 6 * 3600000;
+      else if (duration === '7d') startTs = endTs - 7 * 24 * 3600000;
 
-      const [telemetryData, clientAttributes, serverAttributes, timeseriesData, supportLogsData] = await Promise.all([
-        tbService.getLatestTelemetry(id, ['pm_1', 'pm_2', 'temperature', 'humidity', 'controller_state', 'pm_1_moving_avg', 'pm_2_moving_avg', 'cpu_temp_c', 'pm_1_status', 'pm_2_status']),
-        tbService.getAttributes('DEVICE', id, 'CLIENT_SCOPE', attributeKeys),
-        tbService.getAttributes('DEVICE', id, 'SERVER_SCOPE', ['active', 'pm_1_status', 'pm_2_status']),
-        tbService.getTimeseries(id, ['pm_1_moving_avg', 'pm_2_moving_avg'], startTs, endTs, 1000),
+      const [latest, clientAttrs, serverAttrs, timeseries, support] = await Promise.all([
+        tbService.getLatestTelemetry(deviceId, ['pm_1', 'pm_2', 'temperature', 'humidity', 'controller_state', 'pm_1_moving_avg', 'pm_2_moving_avg', 'cpu_temp_c', 'pm_1_status', 'pm_2_status']),
+        tbService.getAttributes('DEVICE', deviceId, 'CLIENT_SCOPE', attributeKeys),
+        tbService.getAttributes('DEVICE', deviceId, 'SERVER_SCOPE', ['active', 'pm_1_status', 'pm_2_status']),
+        tbService.getTimeseries(deviceId, ['pm_1_moving_avg', 'pm_2_moving_avg'], startTs, endTs, 1000),
         selectedAsset ? tbService.getTimeseries(selectedAsset.id.id, ['TechSupport'], Date.now() - 30 * 24 * 3600000, Date.now(), 5, 'ASSET') : Promise.resolve({ TechSupport: [] })
       ]);
 
-      setSupportLogs(supportLogsData.TechSupport || []);
+      const getAttr = (key: string) => clientAttrs.find((a: any) => a.key === key)?.value;
+      const getServerAttr = (key: string) => serverAttrs.find((a: any) => a.key === key)?.value;
 
-      // Helper to find attribute value
-      const getAttr = (key: string) => clientAttributes.find((a: any) => a.key === key)?.value;
-      const getServerAttr = (key: string) => serverAttributes.find((a: any) => a.key === key)?.value;
-
-      // Extract active status
-      const active = getServerAttr('active') === true;
-
-      // Extract device name
-      const deviceName = String(getAttr('name') || id);
-
-      // Extract fan status
-      const fanStatus = String(getAttr('fan_1_status') || 'Auto');
-
-      // Extract filter counter
-      const filterCounter = Number(getAttr('filter_1_counter') || 3400);
-
-      // Extract air intake status
-      const airIntakeStatus = String(getAttr('airintake_1_status') || 'Auto');
-
-      // Extract relay status
+      // Process relay status
       const relayStatusValue = getAttr('relay_status');
       let relayMap: { [key: string]: string } = {};
-      
       if (relayStatusValue) {
         try {
-          const relayJson = typeof relayStatusValue === 'string' 
-            ? JSON.parse(relayStatusValue) 
-            : relayStatusValue;
-          
+          const relayJson = typeof relayStatusValue === 'string' ? JSON.parse(relayStatusValue) : relayStatusValue;
           for (let i = 1; i <= 16; i++) {
             const key = `relay_${i}_status`;
-            if (relayJson[key] && relayJson[key].status) {
-              relayMap[i] = relayJson[key].status;
-            } else {
-              relayMap[i] = 'OFF';
-            }
+            relayMap[i] = relayJson[key]?.status || 'OFF';
           }
-        } catch (e) {
-          console.error('Error parsing relay_status JSON:', e);
-        }
+        } catch (e) { console.error('Relay parse error', e); }
       }
 
-      setTelemetry({
-        pm_1: telemetryData.pm_1?.[0]?.value || '0',
-        pm_2: telemetryData.pm_2?.[0]?.value || '0',
-        temperature: telemetryData.temperature?.[0]?.value || '22',
-        humidity: telemetryData.humidity?.[0]?.value || '45',
-        lastUpdate: telemetryData.pm_1?.[0]?.ts || Date.now(),
-        fan_1_status: fanStatus,
-        filter_1_counter: filterCounter,
-        relays: relayMap,
-        deviceName: deviceName,
-        active: active,
-        pm_1_status: String(telemetryData.pm_1_status?.[0]?.value || getAttr('pm_1_status') || getServerAttr('pm_1_status') || '-'),
-        pm_2_status: String(telemetryData.pm_2_status?.[0]?.value || getAttr('pm_2_status') || getServerAttr('pm_2_status') || '-'),
-        fan_1_mode: String(getAttr('fan_1_mode') || '-'),
-        fan_1_rpm: String(getAttr('fan_1_rpm') || '-'),
-        fan_1_rs485: String(getAttr('fan_1_rs485') || '-'),
-        fan_2_status: String(getAttr('fan_2_status') || '-'),
-        fan_2_mode: String(getAttr('fan_2_mode') || '-'),
-        fan_2_rpm: String(getAttr('fan_2_rpm') || '-'),
-        fan_2_rs485: String(getAttr('fan_2_rs485') || '-'),
-        fan_3_status: String(getAttr('fan_3_status') || '-'),
-        fan_3_mode: String(getAttr('fan_3_mode') || '-'),
-        fan_3_rpm: String(getAttr('fan_3_rpm') || '-'),
-        fan_3_rs485: String(getAttr('fan_3_rs485') || '-'),
-        airintake_1_mode: String(getAttr('airintake_1_mode') || '-'),
-        airintake_1_status: String(getAttr('airintake_1_status') || '-'),
-        airintake_1_rs485: String(getAttr('airintake_1_rs485') || '-'),
-        airintake_2_mode: String(getAttr('airintake_2_mode') || '-'),
-        airintake_2_status: String(getAttr('airintake_2_status') || '-'),
-        airintake_2_rs485: String(getAttr('airintake_2_rs485') || '-'),
-        // Settings Attributes
-        controller_state: String(telemetryData.controller_state?.[0]?.value || '-'),
-        board_detail: String(getAttr('board_detail') || '-'),
-        board_type: String(getAttr('board_type') || '-'),
-        datetime: String(getAttr('datetime') || '-'),
-        firmware_version: String(getAttr('firmware_version') || '-'),
-        rs485_status: String(getAttr('rs485_status') || '-'),
-        uptime: String(getAttr('uptime') || '-'),
-        status: String(getAttr('status') || '-'),
-        filter_2_counter: Number(getAttr('filter_2_counter') || 0),
-        filter_3_counter: Number(getAttr('filter_3_counter') || 0),
-        pm_1_moving_avg: telemetryData.pm_1_moving_avg?.[0]?.value || '-',
-        pm_2_moving_avg: telemetryData.pm_2_moving_avg?.[0]?.value || '-',
-        cpu_temp_c: telemetryData.cpu_temp_c?.[0]?.value || '-',
-        OTAStatus: String(getAttr('OTAStatus') || 'Idle'),
-        OTAProgress: Number(getAttr('OTAProgress') || 0)
-      });
-
-      // Process indoor history
-      if (timeseriesData.pm_1_moving_avg && timeseriesData.pm_1_moving_avg.length > 0) {
-        const processed = timeseriesData.pm_1_moving_avg.map((item: any) => ({
-          time: new Date(item.ts).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            ...(currentDuration === '7d' ? { day: 'numeric', month: 'short' } : {})
-          }),
-          pm25: parseFloat(item.value),
-          ts: item.ts
-        })).reverse();
-        setIndoorHistory(processed);
-      } else {
-        // Mock if no data
-        const now = Date.now();
-        setIndoorHistory(Array.from({ length: 24 }).map((_, i) => ({
-          time: new Date(now - (23 - i) * 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      // Process history
+      const processHistory = (data: any[], dur: string) => {
+        if (!data || data.length === 0) return Array.from({ length: 24 }).map((_, i) => ({
+          time: new Date(Date.now() - (23 - i) * 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           pm25: Math.floor(Math.random() * 15) + 5,
-        })));
-      }
-
-      // Process outdoor history
-      if (timeseriesData.pm_2_moving_avg && timeseriesData.pm_2_moving_avg.length > 0) {
-        const processed = timeseriesData.pm_2_moving_avg.map((item: any) => ({
+        }));
+        return data.map((item: any) => ({
           time: new Date(item.ts).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            ...(currentDuration === '7d' ? { day: 'numeric', month: 'short' } : {})
+            hour: '2-digit', minute: '2-digit',
+            ...(dur === '7d' ? { day: 'numeric', month: 'short' } : {})
           }),
           pm25: parseFloat(item.value),
           ts: item.ts
         })).reverse();
-        setOutdoorHistory(processed);
-      } else {
-        // Mock if no data
-        const now = Date.now();
-        setOutdoorHistory(Array.from({ length: 24 }).map((_, i) => ({
-          time: new Date(now - (23 - i) * 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          pm25: Math.floor(Math.random() * 25) + 10,
-        })));
-      }
-    } catch (err) {
-      console.error('Telemetry fetch error', err);
+      };
+
+      return {
+        telemetry: {
+          pm_1: latest.pm_1?.[0]?.value || '0',
+          pm_2: latest.pm_2?.[0]?.value || '0',
+          temperature: latest.temperature?.[0]?.value || '22',
+          humidity: latest.humidity?.[0]?.value || '45',
+          lastUpdate: latest.pm_1?.[0]?.ts || Date.now(),
+          fan_1_status: String(getAttr('fan_1_status') || 'Auto'),
+          filter_1_counter: Number(getAttr('filter_1_counter') || 3400),
+          relays: relayMap,
+          deviceName: String(getAttr('name') || deviceId),
+          active: getServerAttr('active') === true,
+          pm_1_status: String(latest.pm_1_status?.[0]?.value || getAttr('pm_1_status') || getServerAttr('pm_1_status') || '-'),
+          pm_2_status: String(latest.pm_2_status?.[0]?.value || getAttr('pm_2_status') || getServerAttr('pm_2_status') || '-'),
+          fan_1_mode: String(getAttr('fan_1_mode') || '-'),
+          fan_1_rpm: String(getAttr('fan_1_rpm') || '-'),
+          fan_1_rs485: String(getAttr('fan_1_rs485') || '-'),
+          fan_2_status: String(getAttr('fan_2_status') || '-'),
+          fan_2_mode: String(getAttr('fan_2_mode') || '-'),
+          fan_2_rpm: String(getAttr('fan_2_rpm') || '-'),
+          fan_2_rs485: String(getAttr('fan_2_rs485') || '-'),
+          fan_3_status: String(getAttr('fan_3_status') || '-'),
+          fan_3_mode: String(getAttr('fan_3_mode') || '-'),
+          fan_3_rpm: String(getAttr('fan_3_rpm') || '-'),
+          fan_3_rs485: String(getAttr('fan_3_rs485') || '-'),
+          airintake_1_mode: String(getAttr('airintake_1_mode') || '-'),
+          airintake_1_status: String(getAttr('airintake_1_status') || '-'),
+          airintake_1_rs485: String(getAttr('airintake_1_rs485') || '-'),
+          airintake_2_mode: String(getAttr('airintake_2_mode') || '-'),
+          airintake_2_status: String(getAttr('airintake_2_status') || '-'),
+          airintake_2_rs485: String(getAttr('airintake_2_rs485') || '-'),
+          controller_state: String(latest.controller_state?.[0]?.value || '-'),
+          board_detail: String(getAttr('board_detail') || '-'),
+          board_type: String(getAttr('board_type') || '-'),
+          datetime: String(getAttr('datetime') || '-'),
+          firmware_version: String(getAttr('firmware_version') || '-'),
+          rs485_status: String(getAttr('rs485_status') || '-'),
+          uptime: String(getAttr('uptime') || '-'),
+          status: String(getAttr('status') || '-'),
+          filter_2_counter: Number(getAttr('filter_2_counter') || 0),
+          filter_3_counter: Number(getAttr('filter_3_counter') || 0),
+          pm_1_moving_avg: latest.pm_1_moving_avg?.[0]?.value || '-',
+          pm_2_moving_avg: latest.pm_2_moving_avg?.[0]?.value || '-',
+          cpu_temp_c: latest.cpu_temp_c?.[0]?.value || '-',
+          OTAStatus: String(getAttr('OTAStatus') || 'Idle'),
+          OTAProgress: Number(getAttr('OTAProgress') || 0)
+        },
+        indoorHistory: processHistory(timeseries.pm_1_moving_avg, duration),
+        outdoorHistory: processHistory(timeseries.pm_2_moving_avg, duration),
+        supportLogs: support.TechSupport || []
+      };
+    },
+    enabled: !!deviceId && (screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support'),
+    refetchInterval: 5000,
+  });
+
+  useEffect(() => {
+    if (telemetryData) {
+      setTelemetry(telemetryData.telemetry);
+      setIndoorHistory(telemetryData.indoorHistory);
+      setOutdoorHistory(telemetryData.outdoorHistory);
+      setSupportLogs(telemetryData.supportLogs);
     }
-  };
+  }, [telemetryData]);
 
   // --- Renderers ---
 
@@ -1028,9 +912,6 @@ export default function App() {
   }
 
   if (screen === 'assets') {
-    // We now use assets state directly as it is updated by API search
-    const filteredAssets = assets;
-
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <Toaster position="top-center" richColors />
@@ -1083,7 +964,7 @@ export default function App() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
               />
-              {isSearching ? (
+              {isAssetsLoading ? (
                 <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-primary animate-spin" size={18} />
               ) : searchTerm && (
                 <button 
@@ -1170,50 +1051,79 @@ export default function App() {
                 </div>
               )}
               
-              {/* Show Assets */}
-              {assets.some(a => a.activeTask) && (
-                <div className="mb-6">
-                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <Clock size={14} className="text-orange-500" />
-                    Active Tasks
-                  </h2>
-                  <div className="space-y-3">
-                    {assets.filter(a => a.activeTask).map((asset) => (
-                      <motion.button
-                        key={`active-${asset.id.id}`}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        onClick={() => handleSelectAsset(asset)}
-                        className="w-full bg-orange-50 p-4 rounded-2xl border border-orange-100 flex items-center justify-between hover:bg-orange-100 transition-all group"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="size-10 bg-orange-500 rounded-xl flex items-center justify-center text-white shadow-lg shadow-orange-200">
-                            <Home size={20} />
-                          </div>
-                          <div className="text-left">
-                            <h3 className="font-bold text-slate-900 text-sm">{asset.address || asset.name}</h3>
-                            <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight">
-                              {asset.techTask || 'Task in progress'}
-                            </p>
-                            {asset.taskTimestamp && (
-                              <p className="text-[9px] text-orange-400 mt-0.5">
-                                {new Date(asset.taskTimestamp).toLocaleString('th-TH', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <ChevronRight className="text-orange-300 group-hover:text-orange-500 transition-all" size={18} />
-                      </motion.button>
-                    ))}
+              {/* Show Active Tasks Table */}
+              <div className="mb-6 overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
+                <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                      <Clock size={14} className="text-orange-500" />
+                      Active Tasks
+                    </h2>
+                    <span className="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {activeTaskAssets.length}
+                    </span>
                   </div>
+                  <button 
+                    onClick={() => refetchAssets()}
+                    className="p-1.5 text-slate-400 hover:text-primary transition-colors"
+                    title="Refresh Active Tasks"
+                  >
+                    <RotateCw size={14} className={isAssetsLoading ? "animate-spin" : ""} />
+                  </button>
                 </div>
-              )}
+                {activeTaskAssets.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 dark:bg-slate-900/50">
+                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address</th>
+                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Task</th>
+                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Time</th>
+                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {activeTaskAssets.map((asset) => (
+                          <tr key={`table-${asset.id.id}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                            <td className="px-4 py-3">
+                              <p className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[120px]">{asset.address || asset.name}</p>
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight truncate max-w-[100px]">
+                                {asset.techTask || 'In Progress'}
+                              </p>
+                            </td>
+                            <td className="px-4 py-3">
+                              {asset.taskTimestamp && (
+                                <p className="text-[9px] text-slate-400 whitespace-nowrap">
+                                  {new Date(asset.taskTimestamp).toLocaleString('th-TH', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button 
+                                onClick={() => handleSelectAsset(asset)}
+                                className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-primary rounded-lg transition-colors"
+                              >
+                                <ChevronRight size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-8 text-center">
+                    <p className="text-xs text-slate-400">No active tasks found</p>
+                  </div>
+                )}
+              </div>
 
               {filteredAssets.map((asset) => (
                 <button 

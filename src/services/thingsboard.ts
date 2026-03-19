@@ -274,8 +274,88 @@ class ThingsboardService {
     }
   }
 
+  async getAssetsWithActiveTasks(groupName: string = 'Houses'): Promise<AssetInfo[]> {
+    console.log(`Querying assets with ActiveTask=true in group "${groupName}"...`);
+    try {
+      // 1. Find the group ID by name
+      const groupsResponse = await axios.get(`${BASE_URL}/api/entityGroups/ASSET`, {
+        params: { pageSize: 100, page: 0 },
+        headers: this.headers,
+      });
+      const groups = groupsResponse.data.data || [];
+      const targetGroup = groups.find((g: any) => g.name === groupName);
+      
+      if (!targetGroup) {
+        console.warn(`Group "${groupName}" not found for active task query`);
+        return [];
+      }
+
+      // 2. Perform entity query to get only assets with ActiveTask=true
+      const query = {
+        entityFilter: {
+          type: 'entityGroup',
+          groupType: 'ASSET',
+          entityGroupId: targetGroup.id.id
+        },
+        keyFilters: [
+          {
+            key: { type: 'TIME_SERIES', key: 'ActiveTask' },
+            valueType: 'BOOLEAN',
+            predicate: {
+              type: 'BOOLEAN',
+              operation: 'EQUAL',
+              value: { defaultValue: true }
+            }
+          }
+        ],
+        entityFields: [
+          { type: 'ENTITY_FIELD', key: 'name' },
+          { type: 'ENTITY_FIELD', key: 'label' },
+          { type: 'ENTITY_FIELD', key: 'type' }
+        ],
+        latestValues: [
+          { type: 'TIME_SERIES', key: 'ActiveTask' },
+          { type: 'TIME_SERIES', key: 'TechTask' }
+        ],
+        pageLink: {
+          pageSize: 100,
+          page: 0,
+          sortOrder: {
+            key: { type: 'ENTITY_FIELD', key: 'name' },
+            direction: 'ASC'
+          }
+        }
+      };
+
+      const response = await axios.post(`${BASE_URL}/api/queries/entities`, query, {
+        headers: this.headers,
+      });
+
+      const data = response.data.data || [];
+      return data.map((item: any) => {
+        const latest = item.latest || {};
+        const activeTaskVal = latest.TIME_SERIES?.ActiveTask?.value;
+        const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
+        const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
+        
+        return {
+          id: item.id,
+          name: item.name,
+          label: item.label,
+          type: item.type,
+          activeTask: activeTaskVal === 'true' || activeTaskVal === true || activeTaskVal === '1',
+          techTask: techTaskVal,
+          taskTimestamp: taskTs
+        };
+      });
+    } catch (error: any) {
+      console.error('Entity query error:', error.response?.data || error.message);
+      return [];
+    }
+  }
+
   async getAssetsByGroup(groupName: string): Promise<AssetInfo[]> {
-    console.log('Fetching assets for group:', groupName);
+    console.log('Fetching assets for group with latest values:', groupName);
     try {
       // 1. Find the group ID by name
       const groupsResponse = await axios.get(`${BASE_URL}/api/entityGroups/ASSET`, {
@@ -288,16 +368,56 @@ class ThingsboardService {
       
       if (!targetGroup) {
         console.warn(`Group "${groupName}" not found, falling back to all assets`);
-        return this.getAssetsByProfile('');
+        return this.getAssetsByProfile('House');
       }
-      
-      // 2. Fetch assets in that group
-      const assetsResponse = await axios.get(`${BASE_URL}/api/entityGroup/${targetGroup.id.id}/entities`, {
-        params: { pageSize: 100, page: 0 },
+
+      // 2. Use Entity Query to get assets with latest telemetry in one call
+      const query = {
+        entityFilter: {
+          type: 'entityGroup',
+          groupType: 'ASSET',
+          entityGroupId: targetGroup.id.id
+        },
+        entityFields: [
+          { type: 'ENTITY_FIELD', key: 'name' },
+          { type: 'ENTITY_FIELD', key: 'label' },
+          { type: 'ENTITY_FIELD', key: 'type' }
+        ],
+        latestValues: [
+          { type: 'TIME_SERIES', key: 'ActiveTask' },
+          { type: 'TIME_SERIES', key: 'TechTask' }
+        ],
+        pageLink: {
+          pageSize: 100,
+          page: 0,
+          sortOrder: {
+            key: { type: 'ENTITY_FIELD', key: 'name' },
+            direction: 'ASC'
+          }
+        }
+      };
+
+      const response = await axios.post(`${BASE_URL}/api/queries/entities`, query, {
         headers: this.headers,
       });
-      
-      return assetsResponse.data.data || [];
+
+      const data = response.data.data || [];
+      return data.map((item: any) => {
+        const latest = item.latest || {};
+        const activeTaskVal = latest.TIME_SERIES?.ActiveTask?.value;
+        const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
+        const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
+        
+        return {
+          id: item.id,
+          name: item.name,
+          label: item.label,
+          type: item.type,
+          activeTask: activeTaskVal === 'true' || activeTaskVal === true || activeTaskVal === '1',
+          techTask: techTaskVal,
+          taskTimestamp: taskTs
+        };
+      });
     } catch (error: any) {
       console.error('Error fetching assets by group:', error.response?.data || error.message);
       // Fallback to profile fetch if group API fails (e.g. if CE version)
@@ -437,6 +557,7 @@ class ThingsboardService {
       return [];
     }
   }
+
 }
 
 export const tbService = new ThingsboardService();
