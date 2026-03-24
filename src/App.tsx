@@ -383,16 +383,25 @@ export default function App() {
     enabled: screen === 'assets' || screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support',
   });
 
-  const activeTaskAssets = useMemo(() => {
-    return (assetsData || []).filter(a => a.activeTask);
-  }, [assetsData]);
+  const filteredActiveTaskAssets = useMemo(() => {
+    const base = (assetsData || []).filter(a => a.activeTask);
+    if (!searchTerm.trim()) return base;
+    const term = searchTerm.toLowerCase();
+    return base.filter(asset => 
+      asset.name.toLowerCase().includes(term) ||
+      (asset.address && asset.address.toLowerCase().includes(term)) ||
+      (asset.project && asset.project.toLowerCase().includes(term))
+    );
+  }, [assetsData, searchTerm]);
 
   const filteredAssets = useMemo(() => {
     const baseAssets = assetsData || [];
     if (!searchTerm.trim()) return baseAssets;
+    const term = searchTerm.toLowerCase();
     return baseAssets.filter(asset => 
-      asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (asset.address && asset.address.toLowerCase().includes(searchTerm.toLowerCase()))
+      asset.name.toLowerCase().includes(term) ||
+      (asset.address && asset.address.toLowerCase().includes(term)) ||
+      (asset.project && asset.project.toLowerCase().includes(term))
     );
   }, [assetsData, searchTerm]);
 
@@ -1060,7 +1069,7 @@ export default function App() {
                       Active Tasks
                     </h2>
                     <span className="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {activeTaskAssets.length}
+                      {filteredActiveTaskAssets.length}
                     </span>
                   </div>
                   <button 
@@ -1071,7 +1080,7 @@ export default function App() {
                     <RotateCw size={14} className={isAssetsLoading ? "animate-spin" : ""} />
                   </button>
                 </div>
-                {activeTaskAssets.length > 0 ? (
+                {filteredActiveTaskAssets.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                       <thead>
@@ -1083,7 +1092,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {activeTaskAssets.map((asset) => (
+                        {filteredActiveTaskAssets.map((asset) => (
                           <tr key={`table-${asset.id.id}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                             <td className="px-4 py-3">
                               <p className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[120px]">{asset.address || asset.name}</p>

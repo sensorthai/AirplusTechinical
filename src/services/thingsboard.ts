@@ -315,7 +315,12 @@ class ThingsboardService {
         ],
         latestValues: [
           { type: 'TIME_SERIES', key: 'ActiveTask' },
-          { type: 'TIME_SERIES', key: 'TechTask' }
+          { type: 'TIME_SERIES', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'address' },
+          { type: 'ATTRIBUTE', key: 'addr' },
+          { type: 'ATTRIBUTE', key: 'project' },
+          { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
+          { type: 'ATTRIBUTE', key: 'วันที่โอน' }
         ],
         pageLink: {
           pageSize: 100,
@@ -338,11 +343,20 @@ class ThingsboardService {
         const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
         const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
         
+        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value;
+        const projectVal = latest.ATTRIBUTE?.project?.value;
+        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value;
+        const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
+
         return {
           id: item.id,
           name: item.name,
           label: item.label,
           type: item.type,
+          address: addressVal,
+          project: projectVal,
+          orderId: orderIdVal,
+          transferDate: transferDateVal,
           activeTask: activeTaskVal === 'true' || activeTaskVal === true || activeTaskVal === '1',
           techTask: techTaskVal,
           taskTimestamp: taskTs
@@ -385,7 +399,12 @@ class ThingsboardService {
         ],
         latestValues: [
           { type: 'TIME_SERIES', key: 'ActiveTask' },
-          { type: 'TIME_SERIES', key: 'TechTask' }
+          { type: 'TIME_SERIES', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'address' },
+          { type: 'ATTRIBUTE', key: 'addr' },
+          { type: 'ATTRIBUTE', key: 'project' },
+          { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
+          { type: 'ATTRIBUTE', key: 'วันที่โอน' }
         ],
         pageLink: {
           pageSize: 100,
@@ -408,11 +427,20 @@ class ThingsboardService {
         const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
         const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
         
+        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value;
+        const projectVal = latest.ATTRIBUTE?.project?.value;
+        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value;
+        const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
+
         return {
           id: item.id,
           name: item.name,
           label: item.label,
           type: item.type,
+          address: addressVal,
+          project: projectVal,
+          orderId: orderIdVal,
+          transferDate: transferDateVal,
           activeTask: activeTaskVal === 'true' || activeTaskVal === true || activeTaskVal === '1',
           techTask: techTaskVal,
           taskTimestamp: taskTs
