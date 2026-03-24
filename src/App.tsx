@@ -17,6 +17,7 @@ import {
   Fan,
   Filter,
   ChevronRight,
+  ChevronLeft,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -290,6 +291,8 @@ export default function App() {
   const [deviceSearchTerm, setDeviceSearchTerm] = useState('');
   const [showOnlyOnline, setShowOnlyOnline] = useState(false);
   const [linkingDevice, setLinkingDevice] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
 
   useEffect(() => {
@@ -383,27 +386,44 @@ export default function App() {
     enabled: screen === 'assets' || screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support',
   });
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, assetsData]);
+
   const filteredActiveTaskAssets = useMemo(() => {
     const base = (assetsData || []).filter(a => a.activeTask);
-    if (!searchTerm.trim()) return base;
-    const term = searchTerm.toLowerCase();
+    const trimmed = searchTerm.trim();
+    if (!trimmed) return base;
+    const term = trimmed.toLowerCase();
     return base.filter(asset => 
       asset.name.toLowerCase().includes(term) ||
+      (asset.label && asset.label.toLowerCase().includes(term)) ||
       (asset.address && asset.address.toLowerCase().includes(term)) ||
-      (asset.project && asset.project.toLowerCase().includes(term))
+      (asset.project && asset.project.toLowerCase().includes(term)) ||
+      (asset.orderId && asset.orderId.toLowerCase().includes(term))
     );
   }, [assetsData, searchTerm]);
 
   const filteredAssets = useMemo(() => {
     const baseAssets = assetsData || [];
-    if (!searchTerm.trim()) return baseAssets;
-    const term = searchTerm.toLowerCase();
+    const trimmed = searchTerm.trim();
+    if (!trimmed) return baseAssets;
+    const term = trimmed.toLowerCase();
     return baseAssets.filter(asset => 
       asset.name.toLowerCase().includes(term) ||
+      (asset.label && asset.label.toLowerCase().includes(term)) ||
       (asset.address && asset.address.toLowerCase().includes(term)) ||
-      (asset.project && asset.project.toLowerCase().includes(term))
+      (asset.project && asset.project.toLowerCase().includes(term)) ||
+      (asset.orderId && asset.orderId.toLowerCase().includes(term))
     );
   }, [assetsData, searchTerm]);
+
+  const paginatedAssets = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredAssets.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredAssets, currentPage]);
+
+  const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -432,9 +452,10 @@ export default function App() {
       const addressAttr = attrs.find((a: any) => 
         a.key.toLowerCase() === 'address' || 
         a.key.toLowerCase().includes('address') ||
-        a.key.toLowerCase() === 'addr'
+        a.key.toLowerCase() === 'addr' ||
+        a.key === 'เลขที่บ้าน'
       );
-      const orderIdAttr = attrs.find((a: any) => a.key === 'รหัสใบสั่งซื้อ');
+      const orderIdAttr = attrs.find((a: any) => a.key === 'รหัสใบสั่งซื้อ' || a.key === 'รหัสแปลง');
       const transferDateAttr = attrs.find((a: any) => a.key === 'วันที่โอน');
       const projectAttr = attrs.find((a: any) => a.key === 'project');
       
@@ -968,7 +989,7 @@ export default function App() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 type="text"
-                placeholder="Search by address..."
+                placeholder="Search by address or plot code..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
@@ -1134,7 +1155,7 @@ export default function App() {
                 )}
               </div>
 
-              {filteredAssets.map((asset) => (
+              {paginatedAssets.map((asset) => (
                 <button 
                   key={asset.id.id}
                   onClick={() => handleSelectAsset(asset)}
@@ -1152,6 +1173,55 @@ export default function App() {
                   <ChevronRight className="text-slate-300 group-hover:text-primary transition-all" size={20} />
                 </button>
               ))}
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-2 pt-4 pb-8">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Page {currentPage} of {totalPages}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum = i + 1;
+                        if (totalPages > 5) {
+                          if (currentPage > 3) {
+                            pageNum = currentPage - 2 + i;
+                            if (pageNum > totalPages) pageNum = totalPages - (4 - i);
+                          }
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={cn(
+                              "size-8 rounded-lg text-xs font-bold transition-all",
+                              currentPage === pageNum 
+                                ? "bg-primary text-white shadow-sm shadow-primary/20" 
+                                : "text-slate-500 hover:bg-slate-50"
+                            )}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                      className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
           

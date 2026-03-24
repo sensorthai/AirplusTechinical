@@ -103,7 +103,7 @@ class ThingsboardService {
       // Try fetching by type first, as "House" is often the asset type
       const response = await axios.get(`${BASE_URL}/api/tenant/assets`, {
         params: {
-          pageSize: 100,
+          pageSize: 6000,
           page: 0,
           type: profileName,
         },
@@ -118,7 +118,7 @@ class ThingsboardService {
       try {
         const response = await axios.get(`${BASE_URL}/api/tenant/assets`, {
           params: {
-            pageSize: 100,
+            pageSize: 6000,
             page: 0,
           },
           headers: this.headers,
@@ -320,10 +320,12 @@ class ThingsboardService {
           { type: 'ATTRIBUTE', key: 'addr' },
           { type: 'ATTRIBUTE', key: 'project' },
           { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
-          { type: 'ATTRIBUTE', key: 'วันที่โอน' }
+          { type: 'ATTRIBUTE', key: 'วันที่โอน' },
+          { type: 'ATTRIBUTE', key: 'รหัสแปลง' },
+          { type: 'ATTRIBUTE', key: 'เลขที่บ้าน' }
         ],
         pageLink: {
-          pageSize: 100,
+          pageSize: 6000,
           page: 0,
           sortOrder: {
             key: { type: 'ENTITY_FIELD', key: 'name' },
@@ -343,9 +345,9 @@ class ThingsboardService {
         const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
         const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
         
-        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value;
+        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value || latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
         const projectVal = latest.ATTRIBUTE?.project?.value;
-        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value;
+        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value || latest.ATTRIBUTE?.['รหัสแปลง']?.value;
         const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
 
         return {
@@ -404,10 +406,12 @@ class ThingsboardService {
           { type: 'ATTRIBUTE', key: 'addr' },
           { type: 'ATTRIBUTE', key: 'project' },
           { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
-          { type: 'ATTRIBUTE', key: 'วันที่โอน' }
+          { type: 'ATTRIBUTE', key: 'วันที่โอน' },
+          { type: 'ATTRIBUTE', key: 'รหัสแปลง' },
+          { type: 'ATTRIBUTE', key: 'เลขที่บ้าน' }
         ],
         pageLink: {
-          pageSize: 100,
+          pageSize: 6000,
           page: 0,
           sortOrder: {
             key: { type: 'ENTITY_FIELD', key: 'name' },
@@ -427,9 +431,9 @@ class ThingsboardService {
         const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
         const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
         
-        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value;
+        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value || latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
         const projectVal = latest.ATTRIBUTE?.project?.value;
-        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value;
+        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value || latest.ATTRIBUTE?.['รหัสแปลง']?.value;
         const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
 
         return {
