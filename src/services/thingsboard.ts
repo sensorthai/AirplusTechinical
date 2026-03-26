@@ -103,7 +103,7 @@ class ThingsboardService {
       // Try fetching by type first, as "House" is often the asset type
       const response = await axios.get(`${BASE_URL}/api/tenant/assets`, {
         params: {
-          pageSize: 6000,
+          pageSize: 16000,
           page: 0,
           type: profileName,
         },
@@ -118,7 +118,7 @@ class ThingsboardService {
       try {
         const response = await axios.get(`${BASE_URL}/api/tenant/assets`, {
           params: {
-            pageSize: 6000,
+            pageSize: 16000,
             page: 0,
           },
           headers: this.headers,
@@ -316,8 +316,15 @@ class ThingsboardService {
         latestValues: [
           { type: 'TIME_SERIES', key: 'ActiveTask' },
           { type: 'TIME_SERIES', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'ActiveTask' },
+          { type: 'ATTRIBUTE', key: 'TechTask' },
           { type: 'ATTRIBUTE', key: 'address' },
+          { type: 'ATTRIBUTE', key: 'Address' },
           { type: 'ATTRIBUTE', key: 'addr' },
+          { type: 'ATTRIBUTE', key: 'Addr' },
+          { type: 'ATTRIBUTE', key: 'Address1' },
+          { type: 'ATTRIBUTE', key: 'houseNo' },
+          { type: 'ATTRIBUTE', key: 'HouseNo' },
           { type: 'ATTRIBUTE', key: 'project' },
           { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
           { type: 'ATTRIBUTE', key: 'วันที่โอน' },
@@ -325,7 +332,7 @@ class ThingsboardService {
           { type: 'ATTRIBUTE', key: 'เลขที่บ้าน' }
         ],
         pageLink: {
-          pageSize: 6000,
+          pageSize: 16000,
           page: 0,
           sortOrder: {
             key: { type: 'ENTITY_FIELD', key: 'name' },
@@ -341,11 +348,21 @@ class ThingsboardService {
       const data = response.data.data || [];
       return data.map((item: any) => {
         const latest = item.latest || {};
-        const activeTaskVal = latest.TIME_SERIES?.ActiveTask?.value;
-        const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
-        const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
+        // Check both TIME_SERIES and ATTRIBUTE for ActiveTask and TechTask
+        const activeTaskVal = latest.ATTRIBUTE?.ActiveTask?.value || latest.TIME_SERIES?.ActiveTask?.value;
+        const techTaskVal = latest.ATTRIBUTE?.TechTask?.value || latest.TIME_SERIES?.TechTask?.value;
+        const taskTs = latest.ATTRIBUTE?.ActiveTask?.ts || latest.TIME_SERIES?.ActiveTask?.ts || 
+                       latest.ATTRIBUTE?.TechTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
         
-        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value || latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
+        const addressVal = 
+          latest.ATTRIBUTE?.address?.value || 
+          latest.ATTRIBUTE?.Address?.value || 
+          latest.ATTRIBUTE?.addr?.value || 
+          latest.ATTRIBUTE?.Addr?.value || 
+          latest.ATTRIBUTE?.Address1?.value || 
+          latest.ATTRIBUTE?.houseNo?.value || 
+          latest.ATTRIBUTE?.HouseNo?.value || 
+          latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
         const projectVal = latest.ATTRIBUTE?.project?.value;
         const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value || latest.ATTRIBUTE?.['รหัสแปลง']?.value;
         const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
@@ -366,6 +383,252 @@ class ThingsboardService {
       });
     } catch (error: any) {
       console.error('Entity query error:', error.response?.data || error.message);
+      return [];
+    }
+  }
+
+  async searchAssetsByAddress(searchTerm: string, groupName: string = 'Houses'): Promise<AssetInfo[]> {
+    console.log(`Searching assets by address "${searchTerm}" in group "${groupName}" at server...`);
+    try {
+      // 1. Find the group ID by name
+      const groupsResponse = await axios.get(`${BASE_URL}/api/entityGroups/ASSET`, {
+        params: { pageSize: 100, page: 0 },
+        headers: this.headers,
+      });
+      const groups = groupsResponse.data.data || [];
+      const targetGroup = groups.find((g: any) => g.name === groupName);
+      
+      if (!targetGroup) {
+        console.warn(`Group "${groupName}" not found for search`);
+        return [];
+      }
+
+      // 2. Perform entity query with keyFilter on address
+      const query = {
+        entityFilter: {
+          type: 'entityGroup',
+          groupType: 'ASSET',
+          entityGroupId: targetGroup.id.id
+        },
+        keyFilters: [
+          {
+            key: { type: 'ATTRIBUTE', key: 'address' },
+            valueType: 'STRING',
+            predicate: {
+              type: 'STRING',
+              operation: 'CONTAINS',
+              value: { defaultValue: searchTerm, dynamicValue: null },
+              ignoreCase: true
+            }
+          }
+        ],
+        entityFields: [
+          { type: 'ENTITY_FIELD', key: 'name' },
+          { type: 'ENTITY_FIELD', key: 'label' },
+          { type: 'ENTITY_FIELD', key: 'type' }
+        ],
+        latestValues: [
+          { type: 'TIME_SERIES', key: 'ActiveTask' },
+          { type: 'TIME_SERIES', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'address' },
+          { type: 'ATTRIBUTE', key: 'Address' },
+          { type: 'ATTRIBUTE', key: 'addr' },
+          { type: 'ATTRIBUTE', key: 'Addr' },
+          { type: 'ATTRIBUTE', key: 'Address1' },
+          { type: 'ATTRIBUTE', key: 'houseNo' },
+          { type: 'ATTRIBUTE', key: 'HouseNo' },
+          { type: 'ATTRIBUTE', key: 'project' },
+          { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
+          { type: 'ATTRIBUTE', key: 'วันที่โอน' },
+          { type: 'ATTRIBUTE', key: 'รหัสแปลง' },
+          { type: 'ATTRIBUTE', key: 'เลขที่บ้าน' }
+        ],
+        pageLink: {
+          pageSize: 100,
+          page: 0,
+          sortOrder: {
+            key: { type: 'ENTITY_FIELD', key: 'name' },
+            direction: 'ASC'
+          }
+        }
+      };
+
+      const response = await axios.post(`${BASE_URL}/api/queries/entities`, query, {
+        headers: this.headers,
+      });
+
+      const data = response.data.data || [];
+      return data.map((item: any) => {
+        const latest = item.latest || {};
+        const activeTaskVal = latest.TIME_SERIES?.ActiveTask?.value;
+        const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
+        const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
+        
+        const addressVal = 
+          latest.ATTRIBUTE?.address?.value || 
+          latest.ATTRIBUTE?.Address?.value || 
+          latest.ATTRIBUTE?.addr?.value || 
+          latest.ATTRIBUTE?.Addr?.value || 
+          latest.ATTRIBUTE?.Address1?.value || 
+          latest.ATTRIBUTE?.houseNo?.value || 
+          latest.ATTRIBUTE?.HouseNo?.value || 
+          latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
+        const projectVal = latest.ATTRIBUTE?.project?.value;
+        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value || latest.ATTRIBUTE?.['รหัสแปลง']?.value;
+        const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
+
+        return {
+          id: item.id,
+          name: item.name,
+          label: item.label,
+          type: item.type,
+          address: addressVal,
+          project: projectVal,
+          orderId: orderIdVal,
+          transferDate: transferDateVal,
+          activeTask: activeTaskVal === 'true' || activeTaskVal === true || activeTaskVal === '1',
+          techTask: techTaskVal,
+          taskTimestamp: taskTs
+        };
+      });
+    } catch (error: any) {
+      console.error('Server-side search error:', error.response?.data || error.message);
+      return [];
+    }
+  }
+
+  async searchAssetsByActiveTask(groupName: string = 'Houses'): Promise<AssetInfo[]> {
+    console.log(`Searching assets with ActiveTask=true (Server Attribute) in group "${groupName}"...`);
+    try {
+      // 1. Find the group ID by name (case-insensitive)
+      const groupsResponse = await axios.get(`${BASE_URL}/api/entityGroups/ASSET`, {
+        params: { pageSize: 100, page: 0 },
+        headers: this.headers,
+      });
+      const groups = groupsResponse.data.data || [];
+      const targetGroup = groups.find((g: any) => 
+        g.name.toLowerCase() === groupName.toLowerCase() || 
+        g.name.toLowerCase() === 'house' || 
+        g.name.toLowerCase() === 'houses'
+      );
+      
+      if (!targetGroup) {
+        console.warn(`Group "${groupName}" not found for active task search, searching all assets`);
+      }
+
+      // 2. Perform entity query with keyFilter on ActiveTask (Server Attribute)
+      // We use STRING filter as it's more common for "true" values in TB attributes
+      const query = {
+        entityFilter: targetGroup ? {
+          type: 'entityGroup',
+          groupType: 'ASSET',
+          entityGroupId: targetGroup.id.id
+        } : {
+          type: 'assetType',
+          assetType: 'House'
+        },
+        keyFilters: [
+          {
+            key: { type: 'ATTRIBUTE', key: 'ActiveTask' },
+            valueType: 'STRING',
+            predicate: {
+              type: 'STRING',
+              operation: 'EQUAL',
+              value: { defaultValue: 'true' }
+            }
+          }
+        ],
+        entityFields: [
+          { type: 'ENTITY_FIELD', key: 'name' },
+          { type: 'ENTITY_FIELD', key: 'label' },
+          { type: 'ENTITY_FIELD', key: 'type' }
+        ],
+        latestValues: [
+          { type: 'TIME_SERIES', key: 'ActiveTask' },
+          { type: 'TIME_SERIES', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'ActiveTask' },
+          { type: 'ATTRIBUTE', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'address' },
+          { type: 'ATTRIBUTE', key: 'Address' },
+          { type: 'ATTRIBUTE', key: 'addr' },
+          { type: 'ATTRIBUTE', key: 'Addr' },
+          { type: 'ATTRIBUTE', key: 'Address1' },
+          { type: 'ATTRIBUTE', key: 'houseNo' },
+          { type: 'ATTRIBUTE', key: 'HouseNo' },
+          { type: 'ATTRIBUTE', key: 'project' },
+          { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
+          { type: 'ATTRIBUTE', key: 'วันที่โอน' },
+          { type: 'ATTRIBUTE', key: 'รหัสแปลง' },
+          { type: 'ATTRIBUTE', key: 'เลขที่บ้าน' }
+        ],
+        pageLink: {
+          pageSize: 16000,
+          page: 0,
+          sortOrder: {
+            key: { type: 'ENTITY_FIELD', key: 'name' },
+            direction: 'ASC'
+          }
+        }
+      };
+
+      const response = await axios.post(`${BASE_URL}/api/queries/entities`, query, {
+        headers: this.headers,
+      });
+
+      const data = response.data.data || [];
+      
+      // If no results with STRING filter, try BOOLEAN filter
+      if (data.length === 0) {
+        query.keyFilters[0].valueType = 'BOOLEAN';
+        query.keyFilters[0].predicate = {
+          type: 'BOOLEAN',
+          operation: 'EQUAL',
+          value: { defaultValue: true }
+        } as any;
+        
+        const retryResponse = await axios.post(`${BASE_URL}/api/queries/entities`, query, {
+          headers: this.headers,
+        });
+        data.push(...(retryResponse.data.data || []));
+      }
+
+      return data.map((item: any) => {
+        const latest = item.latest || {};
+        // Check both TIME_SERIES and ATTRIBUTE for ActiveTask and TechTask
+        const activeTaskVal = latest.ATTRIBUTE?.ActiveTask?.value || latest.TIME_SERIES?.ActiveTask?.value;
+        const techTaskVal = latest.ATTRIBUTE?.TechTask?.value || latest.TIME_SERIES?.TechTask?.value;
+        const taskTs = latest.ATTRIBUTE?.ActiveTask?.ts || latest.TIME_SERIES?.ActiveTask?.ts || 
+                       latest.ATTRIBUTE?.TechTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
+        
+        const addressVal = 
+          latest.ATTRIBUTE?.address?.value || 
+          latest.ATTRIBUTE?.Address?.value || 
+          latest.ATTRIBUTE?.addr?.value || 
+          latest.ATTRIBUTE?.Addr?.value || 
+          latest.ATTRIBUTE?.Address1?.value || 
+          latest.ATTRIBUTE?.houseNo?.value || 
+          latest.ATTRIBUTE?.HouseNo?.value || 
+          latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
+        const projectVal = latest.ATTRIBUTE?.project?.value;
+        const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value || latest.ATTRIBUTE?.['รหัสแปลง']?.value;
+        const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;
+
+        return {
+          id: item.id,
+          name: item.name,
+          label: item.label,
+          type: item.type,
+          address: addressVal,
+          project: projectVal,
+          orderId: orderIdVal,
+          transferDate: transferDateVal,
+          activeTask: activeTaskVal === 'true' || activeTaskVal === true || activeTaskVal === '1',
+          techTask: techTaskVal,
+          taskTimestamp: taskTs
+        };
+      });
+    } catch (error: any) {
+      console.error('Active task search error:', error.response?.data || error.message);
       return [];
     }
   }
@@ -402,8 +665,15 @@ class ThingsboardService {
         latestValues: [
           { type: 'TIME_SERIES', key: 'ActiveTask' },
           { type: 'TIME_SERIES', key: 'TechTask' },
+          { type: 'ATTRIBUTE', key: 'ActiveTask' },
+          { type: 'ATTRIBUTE', key: 'TechTask' },
           { type: 'ATTRIBUTE', key: 'address' },
+          { type: 'ATTRIBUTE', key: 'Address' },
           { type: 'ATTRIBUTE', key: 'addr' },
+          { type: 'ATTRIBUTE', key: 'Addr' },
+          { type: 'ATTRIBUTE', key: 'Address1' },
+          { type: 'ATTRIBUTE', key: 'houseNo' },
+          { type: 'ATTRIBUTE', key: 'HouseNo' },
           { type: 'ATTRIBUTE', key: 'project' },
           { type: 'ATTRIBUTE', key: 'รหัสใบสั่งซื้อ' },
           { type: 'ATTRIBUTE', key: 'วันที่โอน' },
@@ -411,7 +681,7 @@ class ThingsboardService {
           { type: 'ATTRIBUTE', key: 'เลขที่บ้าน' }
         ],
         pageLink: {
-          pageSize: 6000,
+          pageSize: 16000,
           page: 0,
           sortOrder: {
             key: { type: 'ENTITY_FIELD', key: 'name' },
@@ -427,11 +697,21 @@ class ThingsboardService {
       const data = response.data.data || [];
       return data.map((item: any) => {
         const latest = item.latest || {};
-        const activeTaskVal = latest.TIME_SERIES?.ActiveTask?.value;
-        const techTaskVal = latest.TIME_SERIES?.TechTask?.value;
-        const taskTs = latest.TIME_SERIES?.ActiveTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
+        // Check both TIME_SERIES and ATTRIBUTE for ActiveTask and TechTask
+        const activeTaskVal = latest.ATTRIBUTE?.ActiveTask?.value || latest.TIME_SERIES?.ActiveTask?.value;
+        const techTaskVal = latest.ATTRIBUTE?.TechTask?.value || latest.TIME_SERIES?.TechTask?.value;
+        const taskTs = latest.ATTRIBUTE?.ActiveTask?.ts || latest.TIME_SERIES?.ActiveTask?.ts || 
+                       latest.ATTRIBUTE?.TechTask?.ts || latest.TIME_SERIES?.TechTask?.ts;
         
-        const addressVal = latest.ATTRIBUTE?.address?.value || latest.ATTRIBUTE?.addr?.value || latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
+        const addressVal = 
+          latest.ATTRIBUTE?.address?.value || 
+          latest.ATTRIBUTE?.Address?.value || 
+          latest.ATTRIBUTE?.addr?.value || 
+          latest.ATTRIBUTE?.Addr?.value || 
+          latest.ATTRIBUTE?.Address1?.value || 
+          latest.ATTRIBUTE?.houseNo?.value || 
+          latest.ATTRIBUTE?.HouseNo?.value || 
+          latest.ATTRIBUTE?.['เลขที่บ้าน']?.value;
         const projectVal = latest.ATTRIBUTE?.project?.value;
         const orderIdVal = latest.ATTRIBUTE?.['รหัสใบสั่งซื้อ']?.value || latest.ATTRIBUTE?.['รหัสแปลง']?.value;
         const transferDateVal = latest.ATTRIBUTE?.['วันที่โอน']?.value;

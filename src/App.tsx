@@ -54,7 +54,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // --- Types ---
-type Screen = 'login' | 'assets' | 'stats' | 'fans' | 'settings' | 'link-device' | 'support';
+type Screen = 'login' | 'assets' | 'stats' | 'fans' | 'settings' | 'link-device' | 'support' | 'active-tasks';
 
 interface TelemetryData {
   pm_1: string;
@@ -281,7 +281,12 @@ export default function App() {
   const [outdoorHistory, setOutdoorHistory] = useState<any[]>([]);
   const [tab, setTab] = useState<'indoor' | 'outdoor'>('indoor');
   const [duration, setDuration] = useState('24h');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [activeTaskPage, setActiveTaskPage] = useState(1);
+  const tasksPerPage = 10;
+  const [searchQuery, setSearchQuery] = useState('');
+  const [serverSearchResults, setServerSearchResults] = useState<AssetInfo[]>([]);
+  const [isServerSearching, setIsServerSearching] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     const saved = localStorage.getItem('recentSearches');
     return saved ? JSON.parse(saved) : [];
@@ -291,8 +296,6 @@ export default function App() {
   const [deviceSearchTerm, setDeviceSearchTerm] = useState('');
   const [showOnlyOnline, setShowOnlyOnline] = useState(false);
   const [linkingDevice, setLinkingDevice] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
 
 
   useEffect(() => {
@@ -386,44 +389,78 @@ export default function App() {
     enabled: screen === 'assets' || screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support',
   });
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, assetsData]);
+  const { 
+    data: activeTasksData, 
+    isLoading: isActiveTasksLoading, 
+    refetch: refetchActiveTasks 
+  } = useQuery({
+    queryKey: ['activeTasks', userGroups],
+    queryFn: async () => {
+      if (!userGroups || userGroups.length === 0) return [];
+      return await tbService.searchAssetsByActiveTask('Houses');
+    },
+    enabled: screen === 'assets' || screen === 'stats' || screen === 'fans' || screen === 'settings' || screen === 'support',
+  });
 
   const filteredActiveTaskAssets = useMemo(() => {
-    const base = (assetsData || []).filter(a => a.activeTask);
-    const trimmed = searchTerm.trim();
+    const fromServer = activeTasksData || [];
+    const fromLocal = (assetsData || []).filter(a => a.activeTask);
+    
+    // Merge and de-duplicate by ID
+    const merged = [...fromServer];
+    fromLocal.forEach(localAsset => {
+      if (!merged.some(m => m.id.id === localAsset.id.id)) {
+        merged.push(localAsset);
+      }
+    });
+    
+    const base = merged;
+    const trimmed = searchQuery.trim();
     if (!trimmed) return base;
     const term = trimmed.toLowerCase();
-    return base.filter(asset => 
-      asset.name.toLowerCase().includes(term) ||
-      (asset.label && asset.label.toLowerCase().includes(term)) ||
-      (asset.address && asset.address.toLowerCase().includes(term)) ||
-      (asset.project && asset.project.toLowerCase().includes(term)) ||
-      (asset.orderId && asset.orderId.toLowerCase().includes(term))
-    );
-  }, [assetsData, searchTerm]);
+    return base.filter(asset => {
+      const searchFields = [
+        asset.address,
+        asset.name,
+        asset.label,
+        asset.orderId,
+        asset.project
+      ];
+      return searchFields.some(field => 
+        field && String(field).toLowerCase().includes(term)
+      );
+    });
+  }, [assetsData, activeTasksData, searchQuery]);
 
   const filteredAssets = useMemo(() => {
     const baseAssets = assetsData || [];
-    const trimmed = searchTerm.trim();
-    if (!trimmed) return baseAssets;
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return [];
     const term = trimmed.toLowerCase();
-    return baseAssets.filter(asset => 
-      asset.name.toLowerCase().includes(term) ||
-      (asset.label && asset.label.toLowerCase().includes(term)) ||
-      (asset.address && asset.address.toLowerCase().includes(term)) ||
-      (asset.project && asset.project.toLowerCase().includes(term)) ||
-      (asset.orderId && asset.orderId.toLowerCase().includes(term))
-    );
-  }, [assetsData, searchTerm]);
+    
+    // Combine local assets with server search results, avoiding duplicates
+    const localFiltered = baseAssets.filter(asset => {
+      const searchFields = [
+        asset.address,
+        asset.name,
+        asset.label,
+        asset.orderId,
+        asset.project
+      ];
+      return searchFields.some(field => 
+        field && String(field).toLowerCase().includes(term)
+      );
+    });
 
-  const paginatedAssets = useMemo(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    return filteredAssets.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredAssets, currentPage]);
+    const combined = [...localFiltered];
+    serverSearchResults.forEach(serverAsset => {
+      if (!combined.some(a => a.id.id === serverAsset.id.id)) {
+        combined.push(serverAsset);
+      }
+    });
 
-  const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
+    return combined;
+  }, [assetsData, searchQuery, serverSearchResults]);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -440,8 +477,8 @@ export default function App() {
     }
   };
   const handleSelectAsset = async (asset: AssetInfo) => {
-    if (searchTerm.trim()) {
-      addToRecentSearches(searchTerm);
+    if (searchQuery.trim()) {
+      addToRecentSearches(searchQuery);
     }
     setLoading(true);
     let updatedAsset = { ...asset };
@@ -471,7 +508,8 @@ export default function App() {
     }
 
     setSelectedAsset(updatedAsset);
-    setSearchTerm('');
+    setSearchInput('');
+    setSearchQuery('');
     setIsScanning(false);
     try {
       const relations = await tbService.getAssetRelations(asset.id.id);
@@ -511,8 +549,35 @@ export default function App() {
     }
   };
 
+  const handleSearch = async () => {
+    await handleSearchWithTerm(searchInput);
+  };
+
+  const handleSearchWithTerm = async (term: string) => {
+    const trimmed = term.trim();
+    setSearchQuery(trimmed);
+    if (trimmed) {
+      addToRecentSearches(trimmed);
+      
+      // Perform server-side search as well to find records not in the initial 6000
+      setIsServerSearching(true);
+      try {
+        const results = await tbService.searchAssetsByAddress(trimmed);
+        setServerSearchResults(results);
+      } catch (err) {
+        console.error('Server search failed:', err);
+      } finally {
+        setIsServerSearching(false);
+      }
+    } else {
+      setServerSearchResults([]);
+    }
+  };
+
   const handleScanSuccess = React.useCallback(async (decodedText: string) => {
     setIsScanning(false);
+    setSearchInput(decodedText);
+    handleSearchWithTerm(decodedText);
     setLoading(true);
     
     try {
@@ -967,6 +1032,87 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Active Tasks Table - Moved Above Select House Header */}
+        {!isScanning && filteredActiveTaskAssets.length > 0 && (
+          <div className="p-4 bg-white border-b border-slate-100">
+            <div className="overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
+              <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                    <Clock size={14} className="text-orange-500" />
+                    Active Tasks
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {filteredActiveTaskAssets.length}
+                    </span>
+                    <button 
+                      onClick={() => setScreen('active-tasks')}
+                      className="text-[10px] font-bold text-primary hover:underline"
+                    >
+                      View All
+                    </button>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => refetchActiveTasks()}
+                  className="p-1.5 text-slate-400 hover:text-primary transition-colors"
+                  title="Refresh Active Tasks"
+                >
+                  <RotateCw size={14} className={isActiveTasksLoading ? "animate-spin" : ""} />
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-900/50">
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Task</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Time</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                    {filteredActiveTaskAssets.slice(0, 5).map((asset) => (
+                      <tr key={`table-home-${asset.id.id}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[120px]">{asset.address || asset.name}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight truncate max-w-[100px]">
+                            {asset.techTask || 'In Progress'}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3">
+                          {asset.taskTimestamp && (
+                            <p className="text-[9px] text-slate-400 whitespace-nowrap">
+                              {new Date(asset.taskTimestamp).toLocaleString('th-TH', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button 
+                            onClick={() => handleSelectAsset(asset)}
+                            className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-primary rounded-lg transition-colors"
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
         <header className="p-6 bg-white border-b border-slate-100">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -985,25 +1131,42 @@ export default function App() {
           </div>
 
           {!isScanning && (
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
-                type="text"
-                placeholder="Search by address or plot code..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
-              />
-              {isAssetsLoading ? (
-                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-primary animate-spin" size={18} />
-              ) : searchTerm && (
-                <button 
-                  onClick={() => setSearchTerm('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <X size={18} />
-                </button>
-              )}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type="text"
+                  placeholder="Search by address..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch();
+                    }
+                  }}
+                  className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                />
+                {isAssetsLoading || isServerSearching ? (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-primary animate-spin" size={18} />
+                ) : searchInput && (
+                  <button 
+                    onClick={() => {
+                      setSearchInput('');
+                      setSearchQuery('');
+                      setServerSearchResults([]);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+              <button 
+                onClick={handleSearch}
+                className="px-4 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/20 flex items-center justify-center"
+              >
+                Search
+              </button>
             </div>
           )}
 
@@ -1013,7 +1176,12 @@ export default function App() {
               {recentSearches.map((term, i) => (
                 <button
                   key={i}
-                  onClick={() => setSearchTerm(term)}
+                  onClick={() => {
+                    setSearchInput(term);
+                    setSearchQuery(term);
+                    // Trigger server search for recent terms too
+                    handleSearchWithTerm(term);
+                  }}
                   className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-md text-[10px] font-medium text-slate-600 dark:text-slate-300 transition-colors"
                 >
                   {term}
@@ -1070,156 +1238,55 @@ export default function App() {
 
           {!isScanning && (
             <>
-              {filteredAssets.length === 0 && !loading && (
-                <div className="text-center py-12">
-                  <Home className="mx-auto text-slate-300 mb-4" size={48} />
-                  {searchTerm.trim() === '' ? (
-                    <p className="text-slate-500 px-6 font-medium">Search for a house by address to get started</p>
-                  ) : (
-                    <p className="text-slate-500 px-6">No houses found matching "{searchTerm}"</p>
+              {searchQuery ? (
+                <div className="space-y-6">
+                  {/* Search Results List */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">
+                      Search Results ({filteredAssets.length})
+                    </p>
+                    {filteredAssets.map((asset) => (
+                      <button 
+                        key={asset.id.id}
+                        onClick={() => handleSelectAsset(asset)}
+                        className="w-full bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-between hover:border-primary transition-all group"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="size-12 bg-slate-50 dark:bg-slate-900 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
+                            <Home size={24} />
+                          </div>
+                          <div className="text-left">
+                            <h3 className="font-bold text-slate-900 dark:text-white">{asset.name}</h3>
+                            <p className="text-xs text-slate-500">{asset.address || asset.label || 'Residential House'}</p>
+                          </div>
+                        </div>
+                        <ChevronRight className="text-slate-300 group-hover:text-primary transition-all" size={20} />
+                      </button>
+                    ))}
+                    {filteredAssets.length === 0 && !loading && (
+                      <div className="text-center py-12">
+                        <Search className="mx-auto text-slate-300 mb-4" size={48} />
+                        <p className="text-slate-500 px-6">No houses found matching "{searchQuery}"</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Active Tasks Section (Always visible on Home when no search) */}
+                  {isActiveTasksLoading && filteredActiveTaskAssets.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                      <Loader2 className="animate-spin text-primary" size={32} />
+                      <p className="text-xs text-slate-400 font-medium">Fetching active tasks...</p>
+                    </div>
+                  ) : filteredActiveTaskAssets.length > 0 ? null : (
+                    <div className="text-center py-12">
+                      <div className="size-20 bg-slate-50 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Home className="text-slate-300" size={40} />
+                      </div>
+                      <p className="text-slate-500 px-6 font-medium">Search for a house by address to get started</p>
+                    </div>
                   )}
-                </div>
-              )}
-              
-              {/* Show Active Tasks Table */}
-              <div className="mb-6 overflow-hidden bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
-                <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                      <Clock size={14} className="text-orange-500" />
-                      Active Tasks
-                    </h2>
-                    <span className="bg-orange-100 text-orange-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                      {filteredActiveTaskAssets.length}
-                    </span>
-                  </div>
-                  <button 
-                    onClick={() => refetchAssets()}
-                    className="p-1.5 text-slate-400 hover:text-primary transition-colors"
-                    title="Refresh Active Tasks"
-                  >
-                    <RotateCw size={14} className={isAssetsLoading ? "animate-spin" : ""} />
-                  </button>
-                </div>
-                {filteredActiveTaskAssets.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-50 dark:bg-slate-900/50">
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address</th>
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Task</th>
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Time</th>
-                          <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {filteredActiveTaskAssets.map((asset) => (
-                          <tr key={`table-${asset.id.id}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                            <td className="px-4 py-3">
-                              <p className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[120px]">{asset.address || asset.name}</p>
-                            </td>
-                            <td className="px-4 py-3">
-                              <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight truncate max-w-[100px]">
-                                {asset.techTask || 'In Progress'}
-                              </p>
-                            </td>
-                            <td className="px-4 py-3">
-                              {asset.taskTimestamp && (
-                                <p className="text-[9px] text-slate-400 whitespace-nowrap">
-                                  {new Date(asset.taskTimestamp).toLocaleString('th-TH', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                  })}
-                                </p>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button 
-                                onClick={() => handleSelectAsset(asset)}
-                                className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-primary rounded-lg transition-colors"
-                              >
-                                <ChevronRight size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="p-8 text-center">
-                    <p className="text-xs text-slate-400">No active tasks found</p>
-                  </div>
-                )}
-              </div>
-
-              {paginatedAssets.map((asset) => (
-                <button 
-                  key={asset.id.id}
-                  onClick={() => handleSelectAsset(asset)}
-                  className="w-full bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:border-primary transition-all group"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="size-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-all">
-                      <Home size={24} />
-                    </div>
-                    <div className="text-left">
-                      <h3 className="font-bold text-slate-900">{asset.name}</h3>
-                      <p className="text-xs text-slate-500">{asset.address || asset.label || 'Residential House'}</p>
-                    </div>
-                  </div>
-                  <ChevronRight className="text-slate-300 group-hover:text-primary transition-all" size={20} />
-                </button>
-              ))}
-
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-2 pt-4 pb-8">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Page {currentPage} of {totalPages}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                      disabled={currentPage === 1}
-                      className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                    >
-                      <ChevronLeft size={16} />
-                    </button>
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                        let pageNum = i + 1;
-                        if (totalPages > 5) {
-                          if (currentPage > 3) {
-                            pageNum = currentPage - 2 + i;
-                            if (pageNum > totalPages) pageNum = totalPages - (4 - i);
-                          }
-                        }
-                        return (
-                          <button
-                            key={pageNum}
-                            onClick={() => setCurrentPage(pageNum)}
-                            className={cn(
-                              "size-8 rounded-lg text-xs font-bold transition-all",
-                              currentPage === pageNum 
-                                ? "bg-primary text-white shadow-sm shadow-primary/20" 
-                                : "text-slate-500 hover:bg-slate-50"
-                            )}
-                          >
-                            {pageNum}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                      disabled={currentPage === totalPages}
-                      className="size-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
-                    >
-                      <ChevronRight size={16} />
-                    </button>
-                  </div>
                 </div>
               )}
             </>
@@ -2334,6 +2401,102 @@ export default function App() {
                 © 2026 Smart Ventilation Systems
               </p>
             </div>
+          </div>
+        )}
+        {screen === 'active-tasks' && (
+          <div className="flex-1 flex flex-col min-h-0">
+            <header className="p-6 bg-white dark:bg-slate-900 sticky top-0 z-10 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => setScreen('assets')}
+                  className="p-2 bg-slate-50 dark:bg-slate-800 rounded-xl text-slate-500 hover:text-primary transition-colors"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+                <div>
+                  <h1 className="text-xl font-bold text-slate-900 dark:text-white">All Active Tasks</h1>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                    {filteredActiveTaskAssets.length} Total Tasks
+                  </p>
+                </div>
+              </div>
+            </header>
+
+            <main className="flex-1 p-4 overflow-y-auto pb-24">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-900/50">
+                        <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Task</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Time</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {filteredActiveTaskAssets
+                        .slice((activeTaskPage - 1) * tasksPerPage, activeTaskPage * tasksPerPage)
+                        .map((asset) => (
+                        <tr key={`full-table-${asset.id.id}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                          <td className="px-4 py-3">
+                            <p className="font-bold text-slate-900 dark:text-white text-xs truncate max-w-[120px]">{asset.address || asset.name}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-[10px] text-orange-600 font-bold uppercase tracking-tight truncate max-w-[100px]">
+                              {asset.techTask || 'In Progress'}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3">
+                            {asset.taskTimestamp && (
+                              <p className="text-[9px] text-slate-400 whitespace-nowrap">
+                                {new Date(asset.taskTimestamp).toLocaleString('th-TH', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button 
+                              onClick={() => handleSelectAsset(asset)}
+                              className="p-1.5 bg-slate-100 dark:bg-slate-700 text-slate-500 hover:text-primary rounded-lg transition-colors"
+                            >
+                              <ChevronRight size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                {/* Pagination Controls */}
+                {filteredActiveTaskAssets.length > tasksPerPage && (
+                  <div className="p-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
+                    <button 
+                      disabled={activeTaskPage === 1}
+                      onClick={() => setActiveTaskPage(p => Math.max(1, p - 1))}
+                      className="p-2 text-slate-400 hover:text-primary disabled:opacity-30 disabled:hover:text-slate-400 transition-colors"
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                      Page {activeTaskPage} of {Math.ceil(filteredActiveTaskAssets.length / tasksPerPage)}
+                    </span>
+                    <button 
+                      disabled={activeTaskPage >= Math.ceil(filteredActiveTaskAssets.length / tasksPerPage)}
+                      onClick={() => setActiveTaskPage(p => p + 1)}
+                      className="p-2 text-slate-400 hover:text-primary disabled:opacity-30 disabled:hover:text-slate-400 transition-colors"
+                    >
+                      <ChevronRight size={20} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </main>
           </div>
         )}
       </main>
